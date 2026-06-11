@@ -1,0 +1,23 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "PAM-scanning"
+abstract: >-
+  A tool to design CRISPR/Cas9 guide RNAs and primers for ORF-wide chimera
+  insertion ("PAM scanning"), including PAM- and guide-silencing and BLAST+
+  off-target evaluation.
+type: software
+authors:
+  - family-names: Isom
+    given-names: Daniel
+    email: disom.biophysics@gmail.com
+    affiliation: "Isom Lab"
+license: MIT
+version: 1.0.0
+repository-code: "https://github.com/USERNAME/pam-scanning"
+keywords:
+  - CRISPR
+  - Cas9
+  - PAM
+  - guide RNA
+  - genome editing
+  - bioinformatics

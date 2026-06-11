@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pam-scanning"
+version = "1.0.0"
+description = "Design CRISPR guides and primers for ORF-wide chimera (PAM) scanning."
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [{ name = "Daniel Isom", email = "disom.biophysics@gmail.com" }]
+maintainers = [{ name = "Daniel Isom", email = "disom.biophysics@gmail.com" }]
+keywords = ["CRISPR", "Cas9", "PAM", "guide RNA", "genome editing", "yeast", "bioinformatics"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+dependencies = ["openpyxl"]
+
+[project.urls]
+Homepage = "https://github.com/USERNAME/pam-scanning"
+Repository = "https://github.com/USERNAME/pam-scanning"
+Issues = "https://github.com/USERNAME/pam-scanning/issues"
+
+[project.scripts]
+pam-scan = "pam_scanning.cli:main"
+
+[project.gui-scripts]
+pam-scan-gui = "pam_scanning.gui:main"
+
+[project.optional-dependencies]
+test = ["pytest"]
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+pam_scanning = ["data/codon_tables/*.txt"]

@@ -1,0 +1,47 @@
+# Generated PAM-scanning output
+calculation_center/output_data/
+**/*-chimera-insertions-*/
+
+# Large host-genome FASTA files (users supply / build their own BLAST DB)
+calculation_center/genomes/
+*.fsa
+*.nin
+*.nhr
+*.nsq
+*.ndb
+*.not
+*.ntf
+*.nto
+
+# Manuscript / large binaries (kept out of the code repo)
+manuscript/
+
+# Legacy pre-refactor layout — superseded by src/pam_scanning/.
+# Left on disk for reference but kept out of the published repo.
+/code_library/
+/calculation_center/
+/__init__.py
+/__pycache__/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.tox/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# OS / editor cruft
+.DS_Store
+*.swp
+.idea/
+.vscode/

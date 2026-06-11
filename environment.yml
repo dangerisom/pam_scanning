@@ -1,0 +1,11 @@
+name: pam-scanning
+channels:
+  - conda-forge
+  - bioconda
+dependencies:
+  - python >=3.8
+  - openpyxl
+  - blast            # provides the 'blastn' executable used for off-target checks
+  - pip
+  - pip:
+      - -e .

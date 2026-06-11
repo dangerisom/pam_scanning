@@ -1,0 +1,49 @@
+{% set name = "pam-scanning" %}
+{% set version = "1.0.0" %}
+
+package:
+  name: {{ name|lower }}
+  version: {{ version }}
+
+source:
+  # For a Bioconda submission, replace with the released sdist URL + sha256, e.g.:
+  #   url: https://pypi.io/packages/source/p/{{ name }}/pam_scanning-{{ version }}.tar.gz
+  #   sha256: <fill in at release time>
+  # For local `conda build`, build straight from this checkout:
+  path: ..
+
+build:
+  noarch: python
+  number: 0
+  script: {{ PYTHON }} -m pip install . -vv --no-deps --no-build-isolation
+  entry_points:
+    - pam-scan = pam_scanning.cli:main
+    - pam-scan-gui = pam_scanning.gui:main
+
+requirements:
+  host:
+    - python >=3.8
+    - pip
+    - setuptools >=64
+  run:
+    - python >=3.8
+    - openpyxl
+    - blast
+
+test:
+  imports:
+    - pam_scanning
+  commands:
+    - pam-scan --help
+
+about:
+  home: https://github.com/USERNAME/pam-scanning
+  license: MIT
+  license_family: MIT
+  license_file: LICENSE
+  summary: Design CRISPR guides and primers for ORF-wide chimera (PAM) scanning.
+  dev_url: https://github.com/USERNAME/pam-scanning
+
+extra:
+  recipe-maintainers:
+    - USERNAME
