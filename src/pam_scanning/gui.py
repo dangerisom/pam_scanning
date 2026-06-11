@@ -153,11 +153,19 @@ def main():
     # Fonts.
     base = tkfont.nametofont("TkDefaultFont")
     family = base.actual("family")
+    # Pick a monospace family that exists on this platform; fall back to Tk's
+    # built-in fixed font (which Tk maps to a sensible default everywhere).
+    available = set(tkfont.families(root))
+    mono_family = next(
+        (f for f in ("Menlo", "Consolas", "DejaVu Sans Mono", "Courier New")
+         if f in available),
+        tkfont.nametofont("TkFixedFont").actual("family"),
+    )
     f_title = tkfont.Font(family=family, size=20, weight="bold")
     f_subtitle = tkfont.Font(family=family, size=11)
     f_section = tkfont.Font(family=family, size=12, weight="bold")
     f_label = tkfont.Font(family=family, size=11)
-    f_mono = tkfont.Font(family="Menlo", size=10)
+    f_mono = tkfont.Font(family=mono_family, size=10)
     f_button = tkfont.Font(family=family, size=11)
     f_run = tkfont.Font(family=family, size=13, weight="bold")
 
