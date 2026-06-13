@@ -103,11 +103,15 @@ class Tooltip:
         self.wraplength = wraplength
         self._after_id = None
         self._tip = None
+        self._anchor = widget   # the widget the box is positioned under
         widget.bind("<Enter>", self._schedule, add="+")
         widget.bind("<Leave>", self._hide, add="+")
         widget.bind("<ButtonPress>", self._hide, add="+")
 
-    def _schedule(self, _event=None):
+    def _schedule(self, event=None):
+        # Anchor the box under whichever widget the pointer entered (the input
+        # field itself when hovering it), so the help reads as belonging to it.
+        self._anchor = getattr(event, "widget", None) or self.widget
         self._cancel()
         self._after_id = self.widget.after(self.delay, self._show)
 
@@ -119,8 +123,8 @@ class Tooltip:
     def _show(self):
         if self._tip or not self.text:
             return
-        x = self.widget.winfo_rootx()
-        y = self.widget.winfo_rooty() + self.widget.winfo_height() + 6
+        x = self._anchor.winfo_rootx()
+        y = self._anchor.winfo_rooty() + self._anchor.winfo_height() + 6
         self._tip = tk.Toplevel(self.widget)
         self._tip.wm_overrideredirect(True)
         self._tip.wm_geometry("+%d+%d" % (x, y))
