@@ -1,4 +1,4 @@
-name: pam-scanning
+name: pam_scanning
 channels:
   - conda-forge
   - bioconda

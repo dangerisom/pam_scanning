@@ -1,4 +1,4 @@
-{% set name = "pam-scanning" %}
+{% set name = "pam_scanning" %}
 {% set version = "1.0.0" %}
 
 package:
@@ -37,13 +37,13 @@ test:
     - pam-scan --help
 
 about:
-  home: https://github.com/USERNAME/pam-scanning
+  home: https://github.com/dangerisom/pam_scanning
   license: MIT
   license_family: MIT
   license_file: LICENSE
   summary: Design CRISPR guides and primers for ORF-wide chimera (PAM) scanning.
-  dev_url: https://github.com/USERNAME/pam-scanning
+  dev_url: https://github.com/dangerisom/pam_scanning
 
 extra:
   recipe-maintainers:
-    - USERNAME
+    - dangerisom

@@ -22,24 +22,24 @@ easily obtained through conda. The recommended path is therefore conda.
 ### conda (recommended)
 
 ```bash
-git clone https://github.com/USERNAME/pam-scanning.git
-cd pam-scanning
+git clone https://github.com/dangerisom/pam_scanning.git
+cd pam_scanning
 conda env create -f environment.yml
-conda activate pam-scanning
+conda activate pam_scanning
 ```
 
-This installs Python, `openpyxl`, **BLAST+**, and the `pam-scanning` package itself
+This installs Python, `openpyxl`, **BLAST+**, and the `pam_scanning` package itself
 (editable). Once a [Bioconda](https://bioconda.github.io/) release is published you will
 also be able to run:
 
 ```bash
-conda install -c bioconda -c conda-forge pam-scanning
+conda install -c bioconda -c conda-forge pam_scanning
 ```
 
 ### pip
 
 ```bash
-pip install pam-scanning
+pip install pam_scanning
 ```
 
 `pip` does **not** install BLAST+ — install it separately (e.g.
