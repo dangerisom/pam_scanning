@@ -2,15 +2,18 @@
 
 Collects run parameters through a themed form with hover help and hands them to
 :func:`pam_scanning.chimeras.pamscan`. One or more ORFs can be queued; each ORF
-has its own gene name, ORF FASTA, 5'/3' flanks, and optional codon-selection file,
-while the genome, codon table, primer suffixes, and scan parameters are shared.
-Launch with ``pam-scan-gui``.
+has its own gene name and ORF FASTA, plus either its own 5'/3' flanks (per-ORF
+mode) or a single global 5'/3' flank pair shared by every ORF (global mode). The
+genome, codon table, primer suffixes, and scan parameters are always shared. ORFs
+can be added one at a time or discovered from a folder. Launch with ``pam-scan-gui``.
 """
 
 import threading
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, font as tkfont
 from os import getcwd
+
+from pam_scanning.cli import discover_orf_folder
 
 # ---------------------------------------------------------------------------
 # Palette and field definitions
@@ -29,11 +32,8 @@ TIP_BG = "#fffbe6"
 TIP_BORDER = "#c9b458"
 PLACEHOLDER = "No file selected"
 
-# Per-ORF file inputs (each queued ORF gets its own set of these).
-ORF_FILE_FIELDS = [
-    ("orf_file_path", "ORF",
-     "Open the open reading frame (ORF) FASTA file for this gene. The ORF sequence "
-     "should begin with the ATG start codon and end with a stop codon."),
+# Per-ORF flank inputs (used only in per-ORF flank mode).
+ORF_FLANK_FIELDS = [
     ("flank5_file_path", "5' flank  (100 bp -)",
      "FASTA of the 100 bp immediately UPSTREAM of the ATG (the '-' side, in PAM-scanning "
      "context). This lets the scan reach guide/primer positions at the start of the ORF."),
@@ -41,9 +41,16 @@ ORF_FILE_FIELDS = [
      "FASTA of the 100 bp immediately DOWNSTREAM of the stop codon (the '+' side, in "
      "PAM-scanning context). This lets the scan reach guide/primer positions at the end of "
      "the ORF."),
-    ("codon_selection_file_path", "Codon selection (optional)",
-     "Optional .xlsx file listing specific chimera insertion points for THIS ORF. Providing "
-     "it overrides the codon sampling frequency parameter below."),
+]
+
+# Global flank inputs (used only in global flank mode; one pair for every ORF).
+GLOBAL_FLANK_FIELDS = [
+    ("flank5_file_path", "Global 5' flank  (100 bp -)",
+     "A single 5' flank FASTA (100 bp upstream of the ATG) applied to EVERY ORF. Use when all "
+     "ORFs share the same upstream context."),
+    ("flank3_file_path", "Global 3' flank  (100 bp +)",
+     "A single 3' flank FASTA (100 bp downstream of the stop) applied to EVERY ORF. Use when "
+     "all ORFs share the same downstream context."),
 ]
 
 # Shared file inputs (apply to every ORF).
@@ -161,7 +168,7 @@ def main():
     root = tk.Tk()
     root.title("PAM Scanning")
     root.configure(bg=BG)
-    root.minsize(900, 820)
+    root.minsize(900, 840)
 
     # Fonts.
     base = tkfont.nametofont("TkDefaultFont")
@@ -198,6 +205,8 @@ def main():
     style.configure("OrfHead.TLabel", background=CARD, foreground=HEADER_BG, font=f_section)
     style.configure("Path.TLabel", background=CARD, foreground=MUTED, font=f_label)
     style.configure("Status.TLabel", background=BG, foreground=MUTED, font=f_subtitle)
+    style.configure("Mode.TRadiobutton", background=CARD, foreground=TEXT, font=f_label)
+    style.map("Mode.TRadiobutton", background=[("active", CARD)])
     style.configure("TEntry", fieldbackground="#ffffff", padding=4)
     style.configure("Browse.TButton", font=f_button, padding=(10, 4))
     style.configure("Small.TButton", font=f_button, padding=(8, 3))
@@ -219,11 +228,13 @@ def main():
 
     # Shared state variables.
     shared_file_vars = {key: tk.StringVar(value=PLACEHOLDER) for key, _, _ in SHARED_FILE_FIELDS}
+    global_flank_vars = {key: tk.StringVar(value=PLACEHOLDER) for key, _, _ in GLOBAL_FLANK_FIELDS}
     string_vars = {key: tk.StringVar(value=default) for key, _, default, _ in STRING_FIELDS}
     int_vars = {key: tk.StringVar(value=str(default)) for key, _, default, _ in INT_FIELDS}
     output_var = tk.StringVar(value=getcwd())
     status_var = tk.StringVar(value="Ready.")
-    orf_entries = []   # one dict of StringVars (+ card frame) per queued ORF
+    flank_mode = tk.StringVar(value="per_orf")   # "per_orf" or "global"
+    orf_entries = []   # one dict of StringVars (+ widgets) per queued ORF
 
     # --- Scrollable body so the form fits any screen ---------------------
     outer = ttk.Frame(root, style="TFrame")
@@ -278,6 +289,7 @@ def main():
         return card
 
     def add_file_row(card, row, button_label, tip, var):
+        """Add a path-label + Browse-button row; return its widgets (for show/hide)."""
         path_lbl = ttk.Label(card, textvariable=var, style="Path.TLabel",
                              wraplength=560, anchor="w", justify="left")
         path_lbl.grid(row=row, column=0, sticky="we", padx=(14, 6), pady=10)
@@ -291,6 +303,7 @@ def main():
                          command=browse, width=26)
         btn.grid(row=row, column=1, sticky="e", padx=(6, 14), pady=10)
         attach_tip(path_lbl, tip, btn)
+        return [path_lbl, btn]
 
     def add_entry_row(card, row, label, tip, var, *, mono=False, validate=False):
         lbl = ttk.Label(card, text=label, style="Field.TLabel")
@@ -309,6 +322,26 @@ def main():
         attach_tip(lbl, tip, entry)
         return entry
 
+    # --- Flank inputs mode ----------------------------------------------
+    ttk.Label(content, text="Flank inputs", style="Section.TLabel").pack(anchor="w", pady=(14, 6))
+    mode_card = ttk.Frame(content, style="Card.TFrame")
+    mode_card.pack(fill="x")
+    radios = ttk.Frame(mode_card, style="Card.TFrame")
+    radios.pack(anchor="w", padx=14, pady=10)
+    ttk.Radiobutton(radios, text="Per-ORF flanks", value="per_orf", variable=flank_mode,
+                    style="Mode.TRadiobutton").pack(side="left", padx=(0, 24))
+    ttk.Radiobutton(radios, text="Global flanks (one 5'/3' pair for all ORFs)", value="global",
+                    variable=flank_mode, style="Mode.TRadiobutton").pack(side="left")
+
+    # Global flank pickers (shown only in global mode). Held in a container so
+    # the whole block can collapse without disturbing the layout order below.
+    global_flank_holder = ttk.Frame(content, style="TFrame")
+    global_flank_holder.pack(fill="x")
+    global_flank_card = ttk.Frame(global_flank_holder, style="Card.TFrame")
+    global_flank_card.columnconfigure(0, weight=1)
+    for r, (key, blabel, tip) in enumerate(GLOBAL_FLANK_FIELDS):
+        add_file_row(global_flank_card, r, blabel, tip, global_flank_vars[key])
+
     # --- ORFs (one or more) ---------------------------------------------
     ttk.Label(content, text="ORFs", style="Section.TLabel").pack(anchor="w", pady=(14, 6))
     orf_container = ttk.Frame(content, style="TFrame")
@@ -325,6 +358,14 @@ def main():
         entry["card"].destroy()
         orf_entries.remove(entry)
         renumber_orfs()
+
+    def apply_flank_mode_to_entry(entry):
+        show = flank_mode.get() == "per_orf"
+        for w in entry["flank_widgets"]:
+            if show:
+                w.grid()
+            else:
+                w.grid_remove()
 
     def add_orf():
         card = ttk.Frame(orf_container, style="Card.TFrame")
@@ -346,20 +387,100 @@ def main():
         add_entry_row(card, 1, "Gene name", "A short gene-name label used in this ORF's output "
                       "file names.", gene_var)
 
-        r = 2
-        for key, blabel, tip in ORF_FILE_FIELDS:
+        orf_var = tk.StringVar(value=PLACEHOLDER)
+        entry["orf_file_path"] = orf_var
+        add_file_row(card, 2, "ORF", "Open the open reading frame (ORF) FASTA file for this "
+                     "gene. The ORF should begin with the ATG start codon and end with a stop "
+                     "codon.", orf_var)
+
+        # Per-ORF flank rows (rows 3-4); shown/hidden by the flank mode.
+        flank_widgets = []
+        for i, (key, blabel, tip) in enumerate(ORF_FLANK_FIELDS):
             var = tk.StringVar(value=PLACEHOLDER)
             entry[key] = var
-            add_file_row(card, r, blabel, tip, var)
-            r += 1
+            flank_widgets += add_file_row(card, 3 + i, blabel, tip, var)
+        entry["flank_widgets"] = flank_widgets
+
+        sel_var = tk.StringVar(value=PLACEHOLDER)
+        entry["codon_selection_file_path"] = sel_var
+        add_file_row(card, 5, "Codon selection (optional)", "Optional .xlsx file listing "
+                     "specific chimera insertion points for THIS ORF; overrides the codon "
+                     "sampling frequency below.", sel_var)
 
         orf_entries.append(entry)
         renumber_orfs()
+        apply_flank_mode_to_entry(entry)
         return entry
 
-    add_orf()   # start with one ORF
-    ttk.Button(content, text="+  Add ORF", style="Browse.TButton", command=add_orf).pack(
-        anchor="w", pady=(0, 4))
+    # Folder-button help text; the per-ORF version names the flank files, the
+    # global version makes clear those flanks are no longer required per ORF.
+    folder_tip_per_orf = (
+        "Discover ORFs from a folder. Files are named '<gene>_coding.fa', "
+        "'<gene>_flank5.fa', '<gene>_flank3.fa' (+ optional '<gene>_codonSelection.xlsx'). "
+        "The gene name is the part before the suffix.")
+    folder_tip_global = (
+        "Discover ORFs from a folder. Files are named '<gene>_coding.fa' (+ optional "
+        "'<gene>_codonSelection.xlsx'); the gene name is the part before the suffix. The "
+        "global 5'/3' flanks above are applied to every ORF, so per-ORF flank files are "
+        "not needed.")
+    folder_tip = None   # assigned once the folder button is created, below
+
+    def refresh_flank_mode(*_):
+        glob = flank_mode.get() == "global"
+        if glob:
+            global_flank_card.pack(fill="x")
+        else:
+            global_flank_card.pack_forget()
+        for entry in orf_entries:
+            apply_flank_mode_to_entry(entry)
+        if folder_tip is not None:
+            folder_tip.text = folder_tip_global if glob else folder_tip_per_orf
+
+    flank_mode.trace_add("write", refresh_flank_mode)
+
+    # Buttons: add one ORF, or discover many from a folder.
+    orf_buttons = ttk.Frame(content, style="TFrame")
+    orf_buttons.pack(anchor="w", pady=(0, 4))
+    ttk.Button(orf_buttons, text="+  Add ORF", style="Browse.TButton", command=add_orf).pack(
+        side="left", padx=(0, 8))
+
+    def load_folder():
+        folder = filedialog.askdirectory(initialdir=getcwd())
+        if not folder:
+            return
+        try:
+            orfs, skipped = discover_orf_folder(folder)
+        except OSError as exc:
+            messagebox.showerror("Folder error", str(exc))
+            return
+        if not orfs:
+            messagebox.showwarning(
+                "No ORFs found",
+                "No ORF files (named '<gene>_coding.fa', '<gene>_orf.fa', …) were found in:\n%s"
+                % folder)
+            return
+        for entry in list(orf_entries):
+            entry["card"].destroy()
+        orf_entries.clear()
+        for orf in orfs:
+            entry = add_orf()
+            entry["geneName"].set(orf.get("geneName", ""))
+            for key in ("orf_file_path", "flank5_file_path", "flank3_file_path",
+                        "codon_selection_file_path"):
+                if orf.get(key):
+                    entry[key].set(orf[key])
+        renumber_orfs()
+        msg = "Loaded %d ORF(s) from folder." % len(orfs)
+        if skipped:
+            msg += "  Ignored %d unrecognized file(s): %s" % (len(skipped), ", ".join(skipped))
+        status_var.set(msg)
+        if skipped:
+            messagebox.showinfo("Folder loaded", msg)
+
+    folder_btn = ttk.Button(orf_buttons, text="Load folder…", style="Browse.TButton",
+                            command=load_folder)
+    folder_btn.pack(side="left")
+    folder_tip = attach_tip(folder_btn, folder_tip_per_orf)
 
     # --- Shared input files ---------------------------------------------
     card = section("Shared input files", 0)
@@ -399,10 +520,17 @@ def main():
     run_button.pack()
     ttk.Label(content, textvariable=status_var, style="Status.TLabel").pack(anchor="center", pady=(8, 4))
 
+    # Start with one ORF and the initial (per-ORF) flank mode applied.
+    add_orf()
+    refresh_flank_mode()
+
     # --- Run logic -------------------------------------------------------
     def collect_shared():
         shared = {key: var.get() for key, var in shared_file_vars.items()}
         shared.update({key: var.get() for key, var in string_vars.items()})
+        if flank_mode.get() == "global":
+            for key, var in global_flank_vars.items():
+                shared[key] = var.get()
         for key, var in int_vars.items():
             text = var.get().strip()
             if not text:
@@ -414,37 +542,50 @@ def main():
         return shared
 
     def collect_orfs():
+        per_orf_mode = flank_mode.get() == "per_orf"
         orfs = []
         for entry in orf_entries:
-            orfs.append({
+            orf = {
                 "geneName": entry["geneName"].get(),
                 "orf_file_path": entry["orf_file_path"].get(),
-                "flank5_file_path": entry["flank5_file_path"].get(),
-                "flank3_file_path": entry["flank3_file_path"].get(),
                 "codon_selection_file_path": entry["codon_selection_file_path"].get(),
-            })
+            }
+            if per_orf_mode:
+                orf["flank5_file_path"] = entry["flank5_file_path"].get()
+                orf["flank3_file_path"] = entry["flank3_file_path"].get()
+            orfs.append(orf)
         return orfs
 
+    def _is_set(value):
+        return bool(value) and value != PLACEHOLDER
+
     def validate(shared, orfs):
-        genome = shared["local_genome_file_path"]
-        if not genome or genome == PLACEHOLDER:
+        if not _is_set(shared["local_genome_file_path"]):
             messagebox.showerror("Missing input", "Please select the genome sequence.")
             return False
         if not orfs:
             messagebox.showerror("Missing input", "Please add at least one ORF.")
             return False
-        required = (("orf_file_path", "ORF"), ("flank5_file_path", "5' flank"),
-                    ("flank3_file_path", "3' flank"))
+        if flank_mode.get() == "global":
+            if not _is_set(shared.get("flank5_file_path")) or not _is_set(shared.get("flank3_file_path")):
+                messagebox.showerror("Missing input",
+                                     "Global flank mode: please select both global 5' and 3' flanks.")
+                return False
         for i, orf in enumerate(orfs, start=1):
             if not orf["geneName"].strip():
                 messagebox.showerror("Missing input", "Please enter a gene name for ORF %d." % i)
                 return False
-            for key, name in required:
-                if not orf[key] or orf[key] == PLACEHOLDER:
-                    messagebox.showerror("Missing input",
-                                         "ORF %d (%s): please select the %s file."
-                                         % (i, orf["geneName"], name))
-                    return False
+            if not _is_set(orf["orf_file_path"]):
+                messagebox.showerror("Missing input",
+                                     "ORF %d (%s): please select the ORF file." % (i, orf["geneName"]))
+                return False
+            if flank_mode.get() == "per_orf":
+                for key, name in (("flank5_file_path", "5' flank"), ("flank3_file_path", "3' flank")):
+                    if not _is_set(orf[key]):
+                        messagebox.showerror("Missing input",
+                                             "ORF %d (%s): please select the %s file."
+                                             % (i, orf["geneName"], name))
+                        return False
         return True
 
     def finish(error, out_path, n):

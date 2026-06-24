@@ -50,11 +50,15 @@ pam-scan --config run.toml
 
 ## Multiple ORFs
 
-To scan several ORFs in one invocation, list them in a tab-separated **manifest**
-(one ORF per row) and supply the shared parameters with flags or `--config`. The
-recognized columns are `gene`, `orf`, `flank5`, `flank3` (required) and
-`codon_selection` (optional); relative paths resolve against the manifest's
-directory. See `examples/manifest.tsv`.
+Several ORFs can be scanned in one invocation; each produces its own time-stamped
+run directory. There are two ways to supply them.
+
+### Manifest (TSV)
+
+List one ORF per row in a tab-separated **manifest** and supply the shared
+parameters with flags or `--config`. Recognized columns: `gene`, `orf`, `flank5`,
+`flank3` (required) and `codon_selection` (optional); relative paths resolve
+against the manifest's directory. See `examples/manifest.tsv`.
 
 ```tsv
 gene	orf	flank5	flank3	codon_selection
@@ -67,8 +71,41 @@ pam-scan --manifest examples/manifest.tsv \
     --genome /path/to/BY4741_Toronto_2012.fsa --blast-db yeast --output ./results
 ```
 
-Each ORF produces its own time-stamped run directory. In the GUI, use **+ Add ORF**
-to queue additional ORFs, each with its own gene name, ORF, and flank files.
+### Folder (`--orf-dir`)
+
+Point at a folder of FASTA files named by convention; the gene name is the part
+**before** the role suffix. See `examples/orf_folder/`.
+
+| Role | Suffix (any of) | Type |
+| --- | --- | --- |
+| ORF | `_coding`, `_orf`, `_cds` | FASTA |
+| 5′ flank | `_flank5`, `_5flank`, `_upstream` | FASTA |
+| 3′ flank | `_flank3`, `_3flank`, `_downstream` | FASTA |
+| codon selection (optional) | `_codonSelection`, `_codons` | `.xlsx` |
+
+```bash
+pam-scan --orf-dir examples/orf_folder \
+    --genome /path/to/BY4741_Toronto_2012.fsa --blast-db yeast --output ./results
+```
+
+Files whose suffix matches no role are ignored with a warning.
+
+### Global vs per-ORF flanks
+
+Flanks can be supplied **per ORF** (each ORF row/file has its own 5′/3′ flank) or
+**globally** (one 5′/3′ pair applied to every ORF). For global flanks, omit the
+per-ORF flank columns/files and pass `--flank5`/`--flank3` once; they fill in for
+any ORF that doesn't specify its own.
+
+```bash
+# Global flanks shared by every ORF in the folder:
+pam-scan --orf-dir examples/orf_folder \
+    --flank5 shared_flank5.fa --flank3 shared_flank3.fa \
+    --genome genome.fsa --blast-db yeast --output ./results
+```
+
+In the GUI, use **+ Add ORF** to queue ORFs one at a time or **Load folder…** to
+discover them, and choose **Per-ORF flanks** or **Global flanks** under *Flank inputs*.
 
 ## Output
 

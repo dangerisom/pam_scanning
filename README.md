@@ -68,9 +68,11 @@ pam-scan \
     --output ./results
 ```
 
-To scan **multiple ORFs** in one run, list them in a tab-separated manifest and pass
-`--manifest examples/manifest.tsv` with the shared `--genome`/`--blast-db` flags (see
-[`docs/usage.md`](docs/usage.md#multiple-orfs)).
+To scan **multiple ORFs** in one run, either list them in a tab-separated manifest
+(`--manifest examples/manifest.tsv`) or point at a folder of conventionally-named FASTA
+files (`--orf-dir examples/orf_folder`), with the shared `--genome`/`--blast-db` flags.
+Flanks can be given per ORF or shared globally via a single `--flank5`/`--flank3` pair;
+see [`docs/usage.md`](docs/usage.md#multiple-orfs).
 
 All parameters can also be supplied via `--config run.toml` (or `run.json`); explicit
 flags override config values. Run `pam-scan --help` for the full list. The yeast codon
@@ -86,7 +88,8 @@ pam-scan-gui
 ```
 
 A Tkinter form that collects the same parameters and runs the identical pipeline.
-Use **+ Add ORF** to queue several ORFs in one run.
+Use **+ Add ORF** to queue ORFs one at a time, or **Load folder…** to discover a folder
+of them; the *Flank inputs* control switches between per-ORF and global 5′/3′ flanks.
 
 ## Inputs
 

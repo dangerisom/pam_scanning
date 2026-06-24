@@ -67,11 +67,18 @@ def _build_parser():
     p.add_argument("--manifest",
                    help="TSV of ORFs (columns: gene, orf, flank5, flank3, [codon_selection]); "
                         "one ORF per row. Shared params come from flags/--config.")
+    p.add_argument("--orf-dir", dest="orf_dir",
+                   help="Folder of ORFs named '<gene>_coding.fa', '<gene>_flank5.fa', "
+                        "'<gene>_flank3.fa' (+ optional '<gene>_codonSelection.xlsx'). "
+                        "Per-ORF flanks in the folder are used; for GLOBAL flanks shared by "
+                        "every ORF, omit them and pass --flank5/--flank3 instead.")
     p.add_argument("--orf", dest="orf_file_path", help="ORF FASTA (ATG..stop). [single ORF]")
     p.add_argument("--flank5", dest="flank5_file_path",
-                   help="5' flank FASTA: 100 bp upstream of the ATG (the '-' side). [single ORF]")
+                   help="5' flank FASTA: 100 bp upstream of the ATG (the '-' side). Single ORF, "
+                        "or a GLOBAL 5' flank applied to every ORF in --manifest/--orf-dir.")
     p.add_argument("--flank3", dest="flank3_file_path",
-                   help="3' flank FASTA: 100 bp downstream of the stop (the '+' side). [single ORF]")
+                   help="3' flank FASTA: 100 bp downstream of the stop (the '+' side). Single ORF, "
+                        "or a GLOBAL 3' flank applied to every ORF in --manifest/--orf-dir.")
     p.add_argument("--genome", dest="local_genome_file_path",
                    help="Host genome FASTA used for off-target checks.")
     p.add_argument("--codon-table", dest="codon_table_file_path",
@@ -172,6 +179,82 @@ def _load_manifest(path):
     return orfs
 
 
+# --- Folder discovery (flat folder, filename convention) -------------------
+
+# Recognized extensions for the two kinds of input file.
+_FASTA_EXTS = (".fa", ".fasta", ".fna", ".fas")
+_XLSX_EXTS = (".xlsx",)
+
+# Filename-suffix -> role (pamscan kwarg). The gene name is the filename stem
+# with the matched suffix removed; matching is case-insensitive. Flank and
+# codon-selection suffixes are checked before the ORF suffixes (no stem ends in
+# more than one, but this keeps intent explicit).
+_ROLE_SUFFIXES = (
+    ("flank5_file_path", ("_flank5", "_5flank", "_upstream", "_5prime", "_5p")),
+    ("flank3_file_path", ("_flank3", "_3flank", "_downstream", "_3prime", "_3p")),
+    ("codon_selection_file_path",
+     ("_codonselection", "_codon_selection", "_codonselect", "_codons")),
+    ("orf_file_path", ("_coding", "_orf", "_cds")),
+)
+
+
+def discover_orf_folder(path):
+    """Discover ORFs in a flat folder by filename convention (deterministic).
+
+    Files are named ``<gene><suffix><ext>``; the suffix marks the role:
+
+    * ORF:           ``_coding`` / ``_orf`` / ``_cds``          (FASTA)
+    * 5' flank:      ``_flank5`` / ``_5flank`` / ``_upstream``  (FASTA)
+    * 3' flank:      ``_flank3`` / ``_3flank`` / ``_downstream``(FASTA)
+    * codon select.: ``_codonSelection`` / ``_codons``          (.xlsx)
+
+    The gene name is the filename stem with the role suffix removed. Files are
+    grouped into one ORF per gene. Per-ORF flanks found in the folder are kept;
+    when absent, the caller can supply a global 5'/3' flank instead.
+
+    Returns ``(orfs, skipped)`` where *orfs* is a list of per-ORF kwarg dicts
+    ordered by gene name, and *skipped* is a list of FASTA/.xlsx file names whose
+    suffix matched no known role (so callers can warn rather than silently drop).
+    """
+    grouped = {}   # geneName -> {role: full path}
+    skipped = []
+    for name in sorted(os.listdir(path)):
+        full = os.path.join(path, name)
+        if not os.path.isfile(full):
+            continue
+        stem, ext = os.path.splitext(name)
+        ext = ext.lower()
+        if ext not in _FASTA_EXTS and ext not in _XLSX_EXTS:
+            continue  # not an input file we care about (READMEs, .tsv, etc.)
+        low = stem.lower()
+        role = gene = None
+        for key, suffixes in _ROLE_SUFFIXES:
+            match = next((s for s in suffixes if low.endswith(s)), None)
+            if match is not None:
+                role = key
+                gene = stem[: len(stem) - len(match)]
+                break
+        if role is None:
+            skipped.append(name)
+            continue
+        # The extension must suit the role (codon selection is a spreadsheet).
+        wants_xlsx = role == "codon_selection_file_path"
+        if wants_xlsx != (ext in _XLSX_EXTS):
+            skipped.append(name)
+            continue
+        grouped.setdefault(gene, {"geneName": gene})[role] = full
+
+    orfs = []
+    for gene in sorted(grouped):
+        entry = grouped[gene]
+        if "orf_file_path" in entry:
+            orfs.append(entry)
+        else:
+            # A gene with flanks but no ORF file is not a scannable ORF.
+            skipped.extend(os.path.basename(v) for k, v in entry.items() if k != "geneName")
+    return orfs, skipped
+
+
 def _check_blast():
     """Ensure the external NCBI BLAST+ 'blastn' executable is available."""
     if shutil.which("blastn") is None:
@@ -197,7 +280,7 @@ def build_kwargs(argv=None):
 
     # Flags explicitly provided on the command line override config/defaults.
     for key, value in vars(args).items():
-        if key in ("config", "manifest") or value is None:
+        if key in ("config", "manifest", "orf_dir") or value is None:
             continue
         kwargs[key] = value
 
@@ -234,14 +317,31 @@ def _validate(kwargs):
 
 
 def main(argv=None):
-    """Console-script entry point for ``pam-scan`` (single ORF or a --manifest batch)."""
+    """Console-script entry point for ``pam-scan``.
+
+    Handles a single ORF, a ``--manifest`` TSV, or an ``--orf-dir`` folder. In the
+    batch modes, any 5'/3' flank not given per ORF falls back to a global
+    ``--flank5``/``--flank3`` flag, so global and per-ORF flanks both work.
+    """
     base, args = build_kwargs(argv)
+    if args.manifest and args.orf_dir:
+        sys.exit("Error: use either --manifest or --orf-dir, not both.")
     _check_blast()
 
     from pam_scanning.chimeras import pamscan
 
+    orfs = None
     if args.manifest:
         orfs = _load_manifest(args.manifest)
+    elif args.orf_dir:
+        orfs, skipped = discover_orf_folder(args.orf_dir)
+        if skipped:
+            print("Warning: ignored %d unrecognized file(s) in %s: %s"
+                  % (len(skipped), args.orf_dir, ", ".join(skipped)), file=sys.stderr)
+        if not orfs:
+            sys.exit("Error: no ORF files (e.g. '<gene>_coding.fa') found in: %s" % args.orf_dir)
+
+    if orfs is not None:
         total = len(orfs)
         for i, orf in enumerate(orfs, start=1):
             kwargs = dict(base)

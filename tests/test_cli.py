@@ -89,3 +89,71 @@ def test_bundled_manifest_example_loads():
     assert os.path.isfile(orfs[0]["orf_file_path"])
     assert os.path.isfile(orfs[0]["flank5_file_path"])
     assert os.path.isfile(orfs[0]["flank3_file_path"])
+
+
+# --- Folder discovery (--orf-dir) ------------------------------------------
+
+def _touch(path, text=">x\nACGT\n"):
+    with open(path, "w") as fh:
+        fh.write(text)
+
+
+def test_discover_folder_groups_by_gene_and_role(tmp_path):
+    _touch(tmp_path / "FUS3_coding.fa")
+    _touch(tmp_path / "FUS3_flank5.fa")
+    _touch(tmp_path / "FUS3_flank3.fa")
+    (tmp_path / "FUS3_codonSelection.xlsx").write_bytes(b"PK\x03\x04stub")
+    _touch(tmp_path / "KSS1_orf.fasta")
+    _touch(tmp_path / "KSS1_upstream.fa")
+    _touch(tmp_path / "KSS1_downstream.fa")
+
+    orfs, skipped = cli.discover_orf_folder(str(tmp_path))
+    assert skipped == []
+    assert [o["geneName"] for o in orfs] == ["FUS3", "KSS1"]
+    fus3 = orfs[0]
+    assert fus3["orf_file_path"].endswith("FUS3_coding.fa")
+    assert fus3["flank5_file_path"].endswith("FUS3_flank5.fa")
+    assert fus3["flank3_file_path"].endswith("FUS3_flank3.fa")
+    assert fus3["codon_selection_file_path"].endswith("FUS3_codonSelection.xlsx")
+    # Alias suffixes resolve to the same roles.
+    kss1 = orfs[1]
+    assert kss1["orf_file_path"].endswith("KSS1_orf.fasta")
+    assert kss1["flank5_file_path"].endswith("KSS1_upstream.fa")
+    assert kss1["flank3_file_path"].endswith("KSS1_downstream.fa")
+
+
+def test_discover_folder_global_flank_layout(tmp_path):
+    """Only ORF files present: flanks are expected to come from a global flag."""
+    _touch(tmp_path / "GeneA_coding.fa")
+    _touch(tmp_path / "GeneB_coding.fa")
+    orfs, skipped = cli.discover_orf_folder(str(tmp_path))
+    assert skipped == []
+    assert [o["geneName"] for o in orfs] == ["GeneA", "GeneB"]
+    assert all("flank5_file_path" not in o for o in orfs)
+
+
+def test_discover_folder_reports_unrecognized_and_orphans(tmp_path):
+    _touch(tmp_path / "GeneA_coding.fa")
+    _touch(tmp_path / "mystery.fa")          # no role suffix
+    _touch(tmp_path / "GeneC_flank5.fa")     # flank with no ORF -> orphan
+    orfs, skipped = cli.discover_orf_folder(str(tmp_path))
+    assert [o["geneName"] for o in orfs] == ["GeneA"]
+    assert set(skipped) == {"mystery.fa", "GeneC_flank5.fa"}
+
+
+def test_bundled_orf_folder_example_loads():
+    folder = os.path.join(REPO_ROOT, "examples", "orf_folder")
+    orfs, skipped = cli.discover_orf_folder(folder)
+    assert skipped == []
+    assert len(orfs) == 1
+    o = orfs[0]
+    assert o["geneName"] == "FUS3"
+    assert os.path.isfile(o["orf_file_path"])
+    assert os.path.isfile(o["flank5_file_path"])
+    assert os.path.isfile(o["flank3_file_path"])
+    assert os.path.isfile(o["codon_selection_file_path"])
+
+
+def test_manifest_and_orf_dir_are_mutually_exclusive():
+    with pytest.raises(SystemExit):
+        cli.main(["--manifest", "m.tsv", "--orf-dir", "d", "--genome", "g.fsa"])
