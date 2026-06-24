@@ -53,7 +53,8 @@ def test_pamscan_generates_outputs(tmp_path):
 
     pamscan(
         orf_file_path=os.path.join(EXAMPLES, "S288C_YBL016W_FUS3_coding.fa"),
-        orf_plus_buffer_file_path=os.path.join(EXAMPLES, "S288C_YBL016W_FUS3_flanking.fa"),
+        flank5_file_path=os.path.join(EXAMPLES, "S288C_YBL016W_FUS3_flank5.fa"),
+        flank3_file_path=os.path.join(EXAMPLES, "S288C_YBL016W_FUS3_flank3.fa"),
         local_genome_file_path=str(genome),
         codon_table_file_path="No file selected",  # use bundled yeast table
         codon_selection_file_path="No file selected",

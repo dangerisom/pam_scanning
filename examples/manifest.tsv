@@ -1,0 +1,2 @@
+gene	orf	flank5	flank3	codon_selection
+Fus3	fasta/S288C_YBL016W_FUS3_coding.fa	fasta/S288C_YBL016W_FUS3_flank5.fa	fasta/S288C_YBL016W_FUS3_flank3.fa	codon_selection/Fus3-codonSelection.xlsx

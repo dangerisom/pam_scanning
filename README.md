@@ -60,12 +60,17 @@ You need a local BLAST+ nucleotide database for your host genome. See
 ```bash
 pam-scan \
     --orf examples/fasta/S288C_YBL016W_FUS3_coding.fa \
-    --orf-plus examples/fasta/S288C_YBL016W_FUS3_flanking.fa \
+    --flank5 examples/fasta/S288C_YBL016W_FUS3_flank5.fa \
+    --flank3 examples/fasta/S288C_YBL016W_FUS3_flank3.fa \
     --genome /path/to/BY4741_Toronto_2012.fsa \
     --blast-db yeast \
     --gene-name Fus3 \
     --output ./results
 ```
+
+To scan **multiple ORFs** in one run, list them in a tab-separated manifest and pass
+`--manifest examples/manifest.tsv` with the shared `--genome`/`--blast-db` flags (see
+[`docs/usage.md`](docs/usage.md#multiple-orfs)).
 
 All parameters can also be supplied via `--config run.toml` (or `run.json`); explicit
 flags override config values. Run `pam-scan --help` for the full list. The yeast codon
@@ -81,16 +86,21 @@ pam-scan-gui
 ```
 
 A Tkinter form that collects the same parameters and runs the identical pipeline.
+Use **+ Add ORF** to queue several ORFs in one run.
 
 ## Inputs
 
 | Input | Description |
 | --- | --- |
 | ORF FASTA (`--orf`) | The coding sequence, ATG → stop. |
-| ORF+ FASTA (`--orf-plus`) | The same ORF flanked by ≥100 bp of genomic sequence on each side. |
+| 5′ flank FASTA (`--flank5`) | The 100 bp immediately upstream of the ATG (the `-` side), so positions at the start of the ORF can be scanned. |
+| 3′ flank FASTA (`--flank3`) | The 100 bp immediately downstream of the stop (the `+` side), so positions at the end of the ORF can be scanned. |
 | Genome FASTA (`--genome`) | Host genome used for off-target evaluation (also the source for your BLAST DB). |
 | Codon table | Codon-usage table; the bundled yeast table is used if omitted. |
 | Codon selection (optional) | `.xlsx` listing specific residues to target. |
+
+For a batch of ORFs, a TSV manifest (`--manifest`) supplies the ORF, 5′/3′ flank, and
+optional codon-selection paths one row at a time; see [`docs/usage.md`](docs/usage.md#multiple-orfs).
 
 ## Development
 

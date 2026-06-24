@@ -14,12 +14,34 @@ def default_codon_table_path():
 	return str(resources.files("pam_scanning") / "data" / "codon_tables" / "yeast_64_1_1_all_nuclear.cusp.txt")
 
 
+def _read_fasta_sequence(path):
+	"""Read a FASTA file into a single uppercase sequence string.
+
+	Mirrors the original inline reader: header ('>') lines are skipped and the
+	SnapGene '\\r\\n' line ending is handled.
+	"""
+	seq = ""
+	sequenceInput = open(path, "r")
+	for line in sequenceInput.readlines():
+		if line[0] == ">":
+			continue
+		if "\r\n" in line:
+			sLine = line.split("\r\n")  # Necessary becuase this is how SnapGene exports FASTA files...
+		else:
+			sLine = line.split("\n")
+		if sLine:
+			seq += sLine[0]
+	sequenceInput.close()
+	return seq.upper()  # Initial sequence must be uppercase for functions to work properly...
+
+
 def pamscan(**kwargs):
 
 	# Set **kwargs
 
 	orf_file_path = kwargs['orf_file_path']
-	orf_plus_buffer_file_path = kwargs['orf_plus_buffer_file_path']
+	flank5_file_path = kwargs['flank5_file_path']   # 100 bp upstream of the ATG (the "-" side)
+	flank3_file_path = kwargs['flank3_file_path']   # 100 bp downstream of the stop (the "+" side)
 	local_genome_file_path = kwargs['local_genome_file_path']
 	codon_table_file_path = kwargs.get('codon_table_file_path', 'No file selected')
 	codon_selection_file_path = kwargs['codon_selection_file_path']
@@ -43,8 +65,12 @@ def pamscan(**kwargs):
 		print("ORF file is required")
 		return 0
 
-	if orf_plus_buffer_file_path == 'No file selected':
-		print("ORF+ file is required")
+	if flank5_file_path == 'No file selected':
+		print("5' flank file (100 bp upstream of ATG) is required")
+		return 0
+
+	if flank3_file_path == 'No file selected':
+		print("3' flank file (100 bp downstream of stop) is required")
 		return 0
 
 	if local_genome_file_path == 'No file selected':
@@ -105,35 +131,15 @@ def pamscan(**kwargs):
 	# Get DNA sequences...
 	########################################################################################
 
-	# A) Get the ORF sequence flanked by at least 100 bp of 5' and 3' genome sequence...
-	sequenceInput = open(orf_plus_buffer_file_path, "r")
-	orfPlusSequence = ""
-	for line in sequenceInput.readlines():
-		if line[0] == ">":
-			continue
-		if "\r\n" in line:
-			sLine = line.split("\r\n") # Necessary becuase this is how SnapGene exports FASTA files...
-		else:
-			sLine = line.split("\n")
-		if sLine:
-			orfPlusSequence += sLine[0]
-	sequenceInput.close()
-	orfPlusSequence = orfPlusSequence.upper() # Initial sequence must be uppercase for functions to work properly...
+	# A) Get the ORF sequence (ATG to stop) and the 100 bp genomic flanks on each side.
+	orfSequence = _read_fasta_sequence(orf_file_path)
+	flank5Sequence = _read_fasta_sequence(flank5_file_path)   # 100 bp upstream of the ATG
+	flank3Sequence = _read_fasta_sequence(flank3_file_path)   # 100 bp downstream of the stop
 
-	# B) Get the ORF sequence ATG to stop...
-	sequenceInput = open(orf_file_path, "r")
-	orfSequence = ""
-	for line in sequenceInput.readlines():
-		if line[0] == ">":
-			continue
-		if "\r\n" in line:
-			sLine = line.split("\r\n") # Necessary becuase this is how SnapGene exports FASTA files...
-		else:
-			sLine = line.split("\n")
-		if sLine:
-			orfSequence += sLine[0]
-	sequenceInput.close()
-	orfSequence = orfSequence.upper() # Initial sequence must be uppercase for functions to work properly...
+	# B) Assemble the ORF-plus-context sequence: 5' flank + ORF + 3' flank. This is the
+	# sequence the whole algorithm scans; building it from explicit flanks lets us reach
+	# guide/primer positions at the very ends of the ORF.
+	orfPlusSequence = flank5Sequence + orfSequence + flank3Sequence
 
 	########################################################################################
 	# Make a time-stamped directory for the Pamscanning output....
@@ -175,10 +181,15 @@ def pamscan(**kwargs):
 	copyfile(orf_file_path, qcPath + orf_file_path.split(sep)[-1])
 
 	########################################################################################
-	# Copy the orf plus sequence to file for quality control checks...
+	# Copy the flanks and write the assembled ORF-plus-context sequence for QC checks...
 	########################################################################################
 
-	copyfile(orf_plus_buffer_file_path, qcPath + orf_plus_buffer_file_path.split(sep)[-1])
+	copyfile(flank5_file_path, qcPath + flank5_file_path.split(sep)[-1])
+	copyfile(flank3_file_path, qcPath + flank3_file_path.split(sep)[-1])
+	orfPlusOut = open(qcPath + geneName + "-orfPlusContext.fa", "w")
+	orfPlusOut.write("> " + geneName + " | ORF + 5' and 3' flanks (assembled)\n")
+	orfPlusOut.write(fasta(orfPlusSequence))
+	orfPlusOut.close()
 
 	########################################################################################
 	# Set codon information...

@@ -1,7 +1,10 @@
 """Tkinter GUI front-end for PAM-scanning.
 
 Collects run parameters through a themed form with hover help and hands them to
-:func:`pam_scanning.chimeras.pamscan`. Launch with ``pam-scan-gui``.
+:func:`pam_scanning.chimeras.pamscan`. One or more ORFs can be queued; each ORF
+has its own gene name, ORF FASTA, 5'/3' flanks, and optional codon-selection file,
+while the genome, codon table, primer suffixes, and scan parameters are shared.
+Launch with ``pam-scan-gui``.
 """
 
 import threading
@@ -26,29 +29,35 @@ TIP_BG = "#fffbe6"
 TIP_BORDER = "#c9b458"
 PLACEHOLDER = "No file selected"
 
-# Each tuple: (kwarg key, browse-button label, tooltip)
-FILE_FIELDS = [
+# Per-ORF file inputs (each queued ORF gets its own set of these).
+ORF_FILE_FIELDS = [
     ("orf_file_path", "ORF",
-     "Open the open reading frame (ORF) FASTA file for the gene of interest. "
-     "The ORF sequence should begin with the ATG start codon and end with a stop codon."),
-    ("orf_plus_buffer_file_path", "ORF+",
-     "Open the ORF FASTA file flanked by at least ~100 bp (ideally up to 1000 bp) of "
-     "genomic homology on each side."),
+     "Open the open reading frame (ORF) FASTA file for this gene. The ORF sequence "
+     "should begin with the ATG start codon and end with a stop codon."),
+    ("flank5_file_path", "5' flank  (100 bp -)",
+     "FASTA of the 100 bp immediately UPSTREAM of the ATG (the '-' side, in PAM-scanning "
+     "context). This lets the scan reach guide/primer positions at the start of the ORF."),
+    ("flank3_file_path", "3' flank  (100 bp +)",
+     "FASTA of the 100 bp immediately DOWNSTREAM of the stop codon (the '+' side, in "
+     "PAM-scanning context). This lets the scan reach guide/primer positions at the end of "
+     "the ORF."),
+    ("codon_selection_file_path", "Codon selection (optional)",
+     "Optional .xlsx file listing specific chimera insertion points for THIS ORF. Providing "
+     "it overrides the codon sampling frequency parameter below."),
+]
+
+# Shared file inputs (apply to every ORF).
+SHARED_FILE_FIELDS = [
     ("local_genome_file_path", "Genome sequence",
      "The host genome sequence in FASTA format used for off-target evaluation. For a yeast "
      "PAM scan, this is the full yeast genome."),
     ("codon_table_file_path", "Codon table (optional)",
      "Codon-usage table for the host genome. Leave unset to use the bundled yeast table "
      "(yeast_64_1_1_all_nuclear.cusp.txt)."),
-    ("codon_selection_file_path", "Codon selection (optional)",
-     "An .xlsx file listing specific chimera insertion points. Providing this overrides the "
-     "codon sampling frequency parameter below."),
 ]
 
-# Each tuple: (kwarg key, label, default, tooltip)
+# Each tuple: (kwarg key, label, default, tooltip) -- shared string settings.
 STRING_FIELDS = [
-    ("geneName", "Gene name", "MFG",
-     "A short gene-name label used in the names of the generated output files."),
     ("localBlastDb", "Local BLAST database", "yeast",
      "The name (or path) of your local BLAST+ database. To create one, install BLAST+ "
      "(https://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/LATEST/) and run makeblastdb."),
@@ -186,10 +195,12 @@ def main():
     style.configure("Subtitle.TLabel", background=HEADER_BG, foreground=SUBTITLE_FG, font=f_subtitle)
     style.configure("Section.TLabel", background=BG, foreground=HEADER_BG, font=f_section)
     style.configure("Field.TLabel", background=CARD, foreground=TEXT, font=f_label)
+    style.configure("OrfHead.TLabel", background=CARD, foreground=HEADER_BG, font=f_section)
     style.configure("Path.TLabel", background=CARD, foreground=MUTED, font=f_label)
     style.configure("Status.TLabel", background=BG, foreground=MUTED, font=f_subtitle)
     style.configure("TEntry", fieldbackground="#ffffff", padding=4)
     style.configure("Browse.TButton", font=f_button, padding=(10, 4))
+    style.configure("Small.TButton", font=f_button, padding=(8, 3))
     style.configure(
         "Accent.TButton", font=f_run, foreground="#ffffff", background=ACCENT,
         padding=(26, 12), borderwidth=0,
@@ -206,12 +217,13 @@ def main():
 
     vint = (root.register(_validate_int), "%P")
 
-    # State variables.
-    file_vars = {key: tk.StringVar(value=PLACEHOLDER) for key, _, _ in FILE_FIELDS}
+    # Shared state variables.
+    shared_file_vars = {key: tk.StringVar(value=PLACEHOLDER) for key, _, _ in SHARED_FILE_FIELDS}
     string_vars = {key: tk.StringVar(value=default) for key, _, default, _ in STRING_FIELDS}
     int_vars = {key: tk.StringVar(value=str(default)) for key, _, default, _ in INT_FIELDS}
     output_var = tk.StringVar(value=getcwd())
     status_var = tk.StringVar(value="Ready.")
+    orf_entries = []   # one dict of StringVars (+ card frame) per queued ORF
 
     # --- Scrollable body so the form fits any screen ---------------------
     outer = ttk.Frame(root, style="TFrame")
@@ -265,7 +277,7 @@ def main():
         card.columnconfigure(weighted_col, weight=1)
         return card
 
-    def add_file_row(card, row, key, button_label, tip, var):
+    def add_file_row(card, row, button_label, tip, var):
         path_lbl = ttk.Label(card, textvariable=var, style="Path.TLabel",
                              wraplength=560, anchor="w", justify="left")
         path_lbl.grid(row=row, column=0, sticky="we", padx=(14, 6), pady=10)
@@ -280,7 +292,7 @@ def main():
         btn.grid(row=row, column=1, sticky="e", padx=(6, 14), pady=10)
         attach_tip(path_lbl, tip, btn)
 
-    def add_entry_row(card, row, key, label, tip, var, *, mono=False, validate=False):
+    def add_entry_row(card, row, label, tip, var, *, mono=False, validate=False):
         lbl = ttk.Label(card, text=label, style="Field.TLabel")
         lbl.grid(row=row, column=0, sticky="w", padx=(14, 6), pady=8)
         kwargs = {"textvariable": var, "font": f_mono if mono else f_label}
@@ -297,21 +309,72 @@ def main():
         attach_tip(lbl, tip, entry)
         return entry
 
-    # --- Input files -----------------------------------------------------
-    card = section("Input files", 0)
-    for r, (key, blabel, tip) in enumerate(FILE_FIELDS):
-        add_file_row(card, r, key, blabel, tip, file_vars[key])
+    # --- ORFs (one or more) ---------------------------------------------
+    ttk.Label(content, text="ORFs", style="Section.TLabel").pack(anchor="w", pady=(14, 6))
+    orf_container = ttk.Frame(content, style="TFrame")
+    orf_container.pack(fill="x")
+
+    def renumber_orfs():
+        for i, entry in enumerate(orf_entries, start=1):
+            entry["head"].config(text="ORF %d" % i)
+            entry["remove_btn"].config(state=("disabled" if len(orf_entries) == 1 else "normal"))
+
+    def remove_orf(entry):
+        if len(orf_entries) == 1:
+            return
+        entry["card"].destroy()
+        orf_entries.remove(entry)
+        renumber_orfs()
+
+    def add_orf():
+        card = ttk.Frame(orf_container, style="Card.TFrame")
+        card.pack(fill="x", pady=(0, 10))
+        card.columnconfigure(0, weight=1)
+
+        head_bar = ttk.Frame(card, style="Card.TFrame")
+        head_bar.grid(row=0, column=0, columnspan=2, sticky="we", padx=14, pady=(8, 0))
+        head = ttk.Label(head_bar, text="ORF", style="OrfHead.TLabel")
+        head.pack(side="left")
+        entry = {"card": card, "head": head}
+        remove_btn = ttk.Button(head_bar, text="Remove", style="Small.TButton",
+                                command=lambda e=entry: remove_orf(e))
+        remove_btn.pack(side="right")
+        entry["remove_btn"] = remove_btn
+
+        gene_var = tk.StringVar(value="")
+        entry["geneName"] = gene_var
+        add_entry_row(card, 1, "Gene name", "A short gene-name label used in this ORF's output "
+                      "file names.", gene_var)
+
+        r = 2
+        for key, blabel, tip in ORF_FILE_FIELDS:
+            var = tk.StringVar(value=PLACEHOLDER)
+            entry[key] = var
+            add_file_row(card, r, blabel, tip, var)
+            r += 1
+
+        orf_entries.append(entry)
+        renumber_orfs()
+        return entry
+
+    add_orf()   # start with one ORF
+    ttk.Button(content, text="+  Add ORF", style="Browse.TButton", command=add_orf).pack(
+        anchor="w", pady=(0, 4))
+
+    # --- Shared input files ---------------------------------------------
+    card = section("Shared input files", 0)
+    for r, (key, blabel, tip) in enumerate(SHARED_FILE_FIELDS):
+        add_file_row(card, r, blabel, tip, shared_file_vars[key])
 
     # --- Sequence & primer settings -------------------------------------
     card = section("Sequence & primer settings", 1)
     for r, (key, label, _default, tip) in enumerate(STRING_FIELDS):
-        add_entry_row(card, r, key, label, tip, string_vars[key],
-                      mono=(key != "geneName" and key != "localBlastDb"))
+        add_entry_row(card, r, label, tip, string_vars[key], mono=(key != "localBlastDb"))
 
     # --- Scan parameters -------------------------------------------------
     card = section("Scan parameters", 1)
     for r, (key, label, _default, tip) in enumerate(INT_FIELDS):
-        add_entry_row(card, r, key, label, tip, int_vars[key], validate=True)
+        add_entry_row(card, r, label, tip, int_vars[key], validate=True)
 
     # --- Output ----------------------------------------------------------
     card = section("Output", 0)
@@ -327,7 +390,7 @@ def main():
     out_btn = ttk.Button(card, text="Choose directory", style="Browse.TButton",
                          command=browse_dir, width=26)
     out_btn.grid(row=0, column=1, sticky="e", padx=(6, 14), pady=10)
-    attach_tip(out_lbl, "Directory where the time-stamped PAM-scan output folder is written.", out_btn)
+    attach_tip(out_lbl, "Directory where the time-stamped PAM-scan output folder(s) are written.", out_btn)
 
     # --- Action bar ------------------------------------------------------
     action = ttk.Frame(content, style="TFrame")
@@ -337,59 +400,85 @@ def main():
     ttk.Label(content, textvariable=status_var, style="Status.TLabel").pack(anchor="center", pady=(8, 4))
 
     # --- Run logic -------------------------------------------------------
-    def collect_kwargs():
-        kwargs = {key: var.get() for key, var in file_vars.items()}
-        kwargs.update({key: var.get() for key, var in string_vars.items()})
+    def collect_shared():
+        shared = {key: var.get() for key, var in shared_file_vars.items()}
+        shared.update({key: var.get() for key, var in string_vars.items()})
         for key, var in int_vars.items():
             text = var.get().strip()
             if not text:
                 messagebox.showerror("Invalid input", "Please enter a value for '%s'." % key)
                 return None
-            kwargs[key] = int(text)
+            shared[key] = int(text)
         out = output_var.get().strip()
-        kwargs["outputPath"] = out if out and out != PLACEHOLDER else "."
-        return kwargs
+        shared["outputPath"] = out if out and out != PLACEHOLDER else "."
+        return shared
 
-    def validate_required(kwargs):
-        required = {
-            "orf_file_path": "ORF",
-            "orf_plus_buffer_file_path": "ORF+",
-            "local_genome_file_path": "Genome sequence",
-        }
-        missing = [name for key, name in required.items()
-                   if not kwargs[key] or kwargs[key] == PLACEHOLDER]
-        if missing:
-            messagebox.showerror("Missing input", "Please select: " + ", ".join(missing) + ".")
+    def collect_orfs():
+        orfs = []
+        for entry in orf_entries:
+            orfs.append({
+                "geneName": entry["geneName"].get(),
+                "orf_file_path": entry["orf_file_path"].get(),
+                "flank5_file_path": entry["flank5_file_path"].get(),
+                "flank3_file_path": entry["flank3_file_path"].get(),
+                "codon_selection_file_path": entry["codon_selection_file_path"].get(),
+            })
+        return orfs
+
+    def validate(shared, orfs):
+        genome = shared["local_genome_file_path"]
+        if not genome or genome == PLACEHOLDER:
+            messagebox.showerror("Missing input", "Please select the genome sequence.")
             return False
-        if not kwargs["geneName"].strip():
-            messagebox.showerror("Missing input", "Please enter a gene name.")
+        if not orfs:
+            messagebox.showerror("Missing input", "Please add at least one ORF.")
             return False
+        required = (("orf_file_path", "ORF"), ("flank5_file_path", "5' flank"),
+                    ("flank3_file_path", "3' flank"))
+        for i, orf in enumerate(orfs, start=1):
+            if not orf["geneName"].strip():
+                messagebox.showerror("Missing input", "Please enter a gene name for ORF %d." % i)
+                return False
+            for key, name in required:
+                if not orf[key] or orf[key] == PLACEHOLDER:
+                    messagebox.showerror("Missing input",
+                                         "ORF %d (%s): please select the %s file."
+                                         % (i, orf["geneName"], name))
+                    return False
         return True
 
-    def finish(error, out_path):
+    def finish(error, out_path, n):
         run_button.config(state="normal")
         if error is not None:
             status_var.set("Error — see message.")
             messagebox.showerror("PAM scan failed", str(error))
         else:
-            status_var.set("Done. Output written under: " + out_path)
-            messagebox.showinfo("PAM scan complete", "Output written under:\n" + out_path)
+            status_var.set("Done. %d ORF(s) written under: %s" % (n, out_path))
+            messagebox.showinfo("PAM scan complete",
+                                "Output for %d ORF(s) written under:\n%s" % (n, out_path))
 
     def run_scan():
-        kwargs = collect_kwargs()
-        if kwargs is None or not validate_required(kwargs):
+        shared = collect_shared()
+        if shared is None:
+            return
+        orfs = collect_orfs()
+        if not validate(shared, orfs):
             return
         run_button.config(state="disabled")
-        status_var.set("Running PAM scan… progress is printed to the console.")
-        out_path = kwargs["outputPath"]
+        out_path = shared["outputPath"]
+        n = len(orfs)
 
         def worker():
             try:
                 from pam_scanning.chimeras import pamscan
-                pamscan(**kwargs)
-                root.after(0, lambda: finish(None, out_path))
+                for i, orf in enumerate(orfs, start=1):
+                    msg = "Running ORF %d/%d (%s)… progress is printed to the console." % (
+                        i, n, orf["geneName"])
+                    root.after(0, lambda m=msg: status_var.set(m))
+                    pamscan(**dict(shared, **orf))
+                root.after(0, lambda: finish(None, out_path, n))
             except Exception as exc:  # surface any failure back on the UI thread
-                root.after(0, lambda e=exc: finish(e, out_path))
+                root.after(0, lambda e=exc: finish(e, out_path, n))
 
         threading.Thread(target=worker, daemon=True).start()
 

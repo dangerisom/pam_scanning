@@ -54,7 +54,8 @@ the directory that contains them.
 ```bash
 pam-scan \
     --orf examples/fasta/S288C_YBL016W_FUS3_coding.fa \
-    --orf-plus examples/fasta/S288C_YBL016W_FUS3_flanking.fa \
+    --flank5 examples/fasta/S288C_YBL016W_FUS3_flank5.fa \
+    --flank3 examples/fasta/S288C_YBL016W_FUS3_flank3.fa \
     --genome /path/to/BY4741_Toronto_2012.fsa \
     --blast-db yeast \
     --gene-name Fus3 \
