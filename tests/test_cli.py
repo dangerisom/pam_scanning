@@ -157,3 +157,25 @@ def test_bundled_orf_folder_example_loads():
 def test_manifest_and_orf_dir_are_mutually_exclusive():
     with pytest.raises(SystemExit):
         cli.main(["--manifest", "m.tsv", "--orf-dir", "d", "--genome", "g.fsa"])
+
+
+# --- BLAST database prefix -------------------------------------------------
+
+def test_blast_db_prefix_strips_member_extensions():
+    assert cli.blast_db_prefix("/data/yeast.nin") == "/data/yeast"
+    assert cli.blast_db_prefix("/data/yeast.nsq") == "/data/yeast"
+    assert cli.blast_db_prefix("/data/prot.psq") == "/data/prot"
+    # Multi-volume member file.
+    assert cli.blast_db_prefix("/data/big.00.nhr") == "/data/big"
+
+
+def test_blast_db_prefix_leaves_names_and_unrelated_paths_alone():
+    assert cli.blast_db_prefix("yeast") == "yeast"
+    assert cli.blast_db_prefix("/data/yeast") == "/data/yeast"
+    assert cli.blast_db_prefix("/genomes/genome.fsa") == "/genomes/genome.fsa"
+    assert cli.blast_db_prefix("") == ""
+
+
+def test_build_kwargs_normalizes_blast_db_path():
+    base, _ = cli.build_kwargs(["--blast-db", "/data/yeast.nin", "--orf", ORF])
+    assert base["localBlastDb"] == "/data/yeast"

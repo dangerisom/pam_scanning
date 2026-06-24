@@ -31,8 +31,29 @@ The manifest has a header row and one row per ORF. Recognized columns:
 import argparse
 import csv
 import os
+import re
 import shutil
 import sys
+
+
+# A BLAST database is a set of files sharing a prefix; 'blastn -db' takes that
+# prefix. This matches a trailing BLAST member-file extension (e.g. '.nin',
+# '.psq', or a multi-volume '.00.nhr') so a selected member file can be mapped
+# back to the prefix.
+_BLAST_DB_SUFFIX = re.compile(r"\.(?:\d{2,4}\.)?[pn][a-z]{2}$", re.IGNORECASE)
+
+
+def blast_db_prefix(value):
+    """Return the ``blastn -db`` prefix for a database name or member-file path.
+
+    If *value* ends in a BLAST database extension (``.nin``, ``.psq``, a
+    multi-volume ``.00.nhr``, etc.) the extension is stripped so the result is
+    the path/name passed to ``blastn -db``. A bare name like ``yeast`` (resolved
+    via ``$BLASTDB``) is returned unchanged.
+    """
+    if not value:
+        return value
+    return _BLAST_DB_SUFFIX.sub("", value)
 
 
 # Parameter defaults shared with the GUI. Keys match the kwargs that
@@ -288,6 +309,8 @@ def build_kwargs(argv=None):
     kwargs.setdefault("codon_table_file_path", "No file selected")
     kwargs.setdefault("codon_selection_file_path", "No file selected")
     kwargs.setdefault("outputPath", ".")
+    # Accept either a database name or a path to one of its member files.
+    kwargs["localBlastDb"] = blast_db_prefix(kwargs.get("localBlastDb"))
     return kwargs, args
 
 

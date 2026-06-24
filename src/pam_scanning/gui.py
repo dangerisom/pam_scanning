@@ -13,7 +13,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, font as tkfont
 from os import getcwd
 
-from pam_scanning.cli import discover_orf_folder
+from pam_scanning.cli import blast_db_prefix, discover_orf_folder
 
 # ---------------------------------------------------------------------------
 # Palette and field definitions
@@ -65,9 +65,6 @@ SHARED_FILE_FIELDS = [
 
 # Each tuple: (kwarg key, label, default, tooltip) -- shared string settings.
 STRING_FIELDS = [
-    ("localBlastDb", "Local BLAST database", "yeast",
-     "The name (or path) of your local BLAST+ database. To create one, install BLAST+ "
-     "(https://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/LATEST/) and run makeblastdb."),
     ("guidePrimerForwardSuffix", "Guide primer: forward suffix",
      "GTTTTAGAGCTAGAAATAGCAAGTTAAAATAAG",
      "Forward primer sequence that amplifies the CRISPR plasmid starting after the unique "
@@ -229,6 +226,7 @@ def main():
     # Shared state variables.
     shared_file_vars = {key: tk.StringVar(value=PLACEHOLDER) for key, _, _ in SHARED_FILE_FIELDS}
     global_flank_vars = {key: tk.StringVar(value=PLACEHOLDER) for key, _, _ in GLOBAL_FLANK_FIELDS}
+    blast_db_var = tk.StringVar(value="yeast")   # BLAST -db prefix (name or browsed path)
     string_vars = {key: tk.StringVar(value=default) for key, _, default, _ in STRING_FIELDS}
     int_vars = {key: tk.StringVar(value=str(default)) for key, _, default, _ in INT_FIELDS}
     output_var = tk.StringVar(value=getcwd())
@@ -487,10 +485,33 @@ def main():
     for r, (key, blabel, tip) in enumerate(SHARED_FILE_FIELDS):
         add_file_row(card, r, blabel, tip, shared_file_vars[key])
 
+    # Local BLAST database: browse to any member file; store the -db prefix.
+    db_row = len(SHARED_FILE_FIELDS)
+    db_lbl = ttk.Label(card, textvariable=blast_db_var, style="Path.TLabel",
+                       wraplength=560, anchor="w", justify="left")
+    db_lbl.grid(row=db_row, column=0, sticky="we", padx=(14, 6), pady=10)
+
+    def browse_blast_db():
+        chosen = filedialog.askopenfilename(
+            initialdir=getcwd(),
+            title="Select any file of your BLAST database (e.g. yeast.nin)")
+        if chosen:
+            blast_db_var.set(blast_db_prefix(chosen))
+
+    db_btn = ttk.Button(card, text="Browse  Local BLAST database", style="Browse.TButton",
+                       command=browse_blast_db, width=26)
+    db_btn.grid(row=db_row, column=1, sticky="e", padx=(6, 14), pady=10)
+    attach_tip(db_lbl,
+               "Your local BLAST+ database. Browse to any file of the database (e.g. "
+               "yeast.nin / yeast.nsq); the shared prefix path is used as 'blastn -db'. "
+               "Defaults to the name 'yeast', resolved via your $BLASTDB. Build a database "
+               "with 'makeblastdb' (install BLAST+ from "
+               "https://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/LATEST/).", db_btn)
+
     # --- Sequence & primer settings -------------------------------------
     card = section("Sequence & primer settings", 1)
     for r, (key, label, _default, tip) in enumerate(STRING_FIELDS):
-        add_entry_row(card, r, label, tip, string_vars[key], mono=(key != "localBlastDb"))
+        add_entry_row(card, r, label, tip, string_vars[key], mono=True)
 
     # --- Scan parameters -------------------------------------------------
     card = section("Scan parameters", 1)
@@ -528,6 +549,7 @@ def main():
     def collect_shared():
         shared = {key: var.get() for key, var in shared_file_vars.items()}
         shared.update({key: var.get() for key, var in string_vars.items()})
+        shared["localBlastDb"] = blast_db_prefix(blast_db_var.get())
         if flank_mode.get() == "global":
             for key, var in global_flank_vars.items():
                 shared[key] = var.get()

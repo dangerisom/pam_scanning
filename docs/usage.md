@@ -13,7 +13,7 @@ All three share the same parameters and produce the same output.
 | `--flank3` | `flank3_file_path` | *(required, per ORF)* | FASTA of the 100 bp immediately **downstream** of the stop (the `+` side). Lets the scan reach positions at the end of the ORF. |
 | `--manifest` | *(n/a)* | *(none)* | TSV of ORFs (one row each) for batch runs; see [Multiple ORFs](#multiple-orfs). |
 | `--genome` | `local_genome_file_path` | *(required)* | Host genome FASTA for off-target checks. |
-| `--blast-db` | `localBlastDb` | `yeast` | Name/path of the local BLAST+ database. |
+| `--blast-db` | `localBlastDb` | `yeast` | Local BLAST+ database. A bare name (e.g. `yeast`) is resolved via `$BLASTDB`; a path prefix or a path to any member file (e.g. `/data/yeast.nin`) is accepted and reduced to the prefix. In the GUI this is a **Browse** button — pick any database file and the prefix path is used. |
 | `--gene-name` | `geneName` | *(required, per ORF)* | Label used in output filenames. |
 | `--codon-table` | `codon_table_file_path` | bundled yeast table | Codon-usage table (`.cusp`-style). |
 | `--codon-selection` | `codon_selection_file_path` | *(none, per ORF)* | `.xlsx` of specific residues to target; overrides sampling. |

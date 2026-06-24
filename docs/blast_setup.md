@@ -45,9 +45,12 @@ makeblastdb -in /path/to/BY4741_Toronto_2012.fsa -dbtype nucl -out yeast
 ```
 
 This produces a set of `yeast.*` index files. The name you give `-out` (here `yeast`) is
-exactly what you pass to PAM-scanning as `--blast-db` (CLI) or "Local BLAST database"
-(GUI). Keep the database files together; point `--blast-db` at the full path or run from
-the directory that contains them.
+exactly what you pass to PAM-scanning as `--blast-db` (CLI). Keep the database files
+together; point `--blast-db` at the full path prefix (e.g. `/data/yeast`), pass a path to
+any one member file (e.g. `/data/yeast.nin` — the prefix is taken automatically), or use a
+bare name and run from the directory that contains the files (or set `$BLASTDB`). In the
+GUI, the **Browse  Local BLAST database** button lets you pick any database file and uses
+its prefix path.
 
 ## 4. Run
 
