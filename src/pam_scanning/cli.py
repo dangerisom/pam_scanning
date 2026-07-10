@@ -26,6 +26,16 @@ parameters supplied by flags or ``--config``::
 The manifest has a header row and one row per ORF. Recognized columns:
 ``gene``, ``orf``, ``flank5``, ``flank3`` (required) and ``codon_selection``
 (optional). Relative paths are resolved against the manifest's directory.
+
+Either flank may instead be given as a literal sequence with ``--flank5-seq`` /
+``--flank3-seq``, which is convenient for the global flanks shared by a whole
+batch of ORFs::
+
+    pam-scan --orf-dir ./orfs --flank5-seq "$(cat up.txt)" --flank3-seq ACGT... \\
+        --genome genome.fsa --blast-db yeast
+
+For a given side, pass the FASTA flag or the sequence flag, not both. A per-ORF
+flank from a manifest or folder takes precedence over a global flank sequence.
 """
 
 import argparse
@@ -34,6 +44,8 @@ import os
 import re
 import shutil
 import sys
+
+from pam_scanning.chimeras import parse_sequence_text
 
 
 # A BLAST database is a set of files sharing a prefix; 'blastn -db' takes that
@@ -75,6 +87,14 @@ DEFAULTS = {
 PER_ORF_KEYS = ("geneName", "orf_file_path", "flank5_file_path", "flank3_file_path",
                 "codon_selection_file_path")
 
+# chimeras.pamscan treats this sentinel as "not provided".
+NOT_SELECTED = "No file selected"
+
+
+def _is_set(value):
+    """True when an option holds a real value rather than being unset/sentinel."""
+    return bool(value) and value != NOT_SELECTED
+
 
 def _build_parser():
     p = argparse.ArgumentParser(
@@ -100,6 +120,12 @@ def _build_parser():
     p.add_argument("--flank3", dest="flank3_file_path",
                    help="3' flank FASTA: 100 bp downstream of the stop (the '+' side). Single ORF, "
                         "or a GLOBAL 3' flank applied to every ORF in --manifest/--orf-dir.")
+    p.add_argument("--flank5-seq", dest="flank5_sequence",
+                   help="5' flank as a literal sequence instead of a FASTA file. Mutually "
+                        "exclusive with --flank5.")
+    p.add_argument("--flank3-seq", dest="flank3_sequence",
+                   help="3' flank as a literal sequence instead of a FASTA file. Mutually "
+                        "exclusive with --flank3.")
     p.add_argument("--genome", dest="local_genome_file_path",
                    help="Host genome FASTA used for off-target checks.")
     p.add_argument("--codon-table", dest="codon_table_file_path",
@@ -306,37 +332,78 @@ def build_kwargs(argv=None):
         kwargs[key] = value
 
     # File-path defaults: chimeras.pamscan treats these sentinels as "not provided".
-    kwargs.setdefault("codon_table_file_path", "No file selected")
-    kwargs.setdefault("codon_selection_file_path", "No file selected")
+    kwargs.setdefault("codon_table_file_path", NOT_SELECTED)
+    kwargs.setdefault("codon_selection_file_path", NOT_SELECTED)
     kwargs.setdefault("outputPath", ".")
     # Accept either a database name or a path to one of its member files.
     kwargs["localBlastDb"] = blast_db_prefix(kwargs.get("localBlastDb"))
+    _normalize_flank_sequences(kwargs)
     return kwargs, args
+
+
+def _normalize_flank_sequences(kwargs):
+    """Validate and clean any flank given as a sequence; reject file+sequence clashes.
+
+    Parsing here means a typo in a pasted sequence fails immediately, rather than
+    after the run has already reached BLAST.
+    """
+    for side in ("5", "3"):
+        seq_key, path_key = "flank%s_sequence" % side, "flank%s_file_path" % side
+        raw = kwargs.get(seq_key)
+        if not _is_set(raw):
+            kwargs.pop(seq_key, None)
+            continue
+        if _is_set(kwargs.get(path_key)):
+            sys.exit("Error: use either --flank%s or --flank%s-seq, not both." % (side, side))
+        try:
+            kwargs[seq_key] = parse_sequence_text(raw, "%s' flank sequence" % side)
+        except ValueError as exc:
+            sys.exit("Error: %s" % exc)
 
 
 def _validate(kwargs):
     """Fail early, with clear messages, on missing required inputs for one ORF."""
     required = {
         "orf_file_path": "--orf / manifest 'orf'",
-        "flank5_file_path": "--flank5 / manifest 'flank5'",
-        "flank3_file_path": "--flank3 / manifest 'flank3'",
         "local_genome_file_path": "--genome",
     }
-    missing = [flag for key, flag in required.items()
-               if not kwargs.get(key) or kwargs.get(key) == "No file selected"]
+    missing = [flag for key, flag in required.items() if not _is_set(kwargs.get(key))]
+    # Each flank may arrive as a FASTA file or as a sequence; one of the two is required.
+    for side in ("5", "3"):
+        if not _is_set(kwargs.get("flank%s_file_path" % side)) \
+                and not _is_set(kwargs.get("flank%s_sequence" % side)):
+            missing.append("--flank%s / --flank%s-seq / manifest 'flank%s'" % (side, side, side))
     if missing:
         sys.exit("Error: missing required input(s): %s" % ", ".join(sorted(missing)))
 
     if not kwargs.get("geneName"):
         sys.exit("Error: a gene name is required (--gene-name or manifest 'gene').")
 
+    # Only the file form has a path to check; sequences were validated at parse time.
     for key, flag in (("orf_file_path", "--orf"),
                       ("flank5_file_path", "--flank5"),
                       ("flank3_file_path", "--flank3"),
                       ("local_genome_file_path", "--genome")):
-        path = kwargs[key]
+        path = kwargs.get(key)
+        if not _is_set(path):
+            continue
         if not os.path.isfile(path):
             sys.exit("Error: file for %s does not exist: %s" % (flag, path))
+
+
+def _merge_orf(base, orf):
+    """Merge one ORF's fields onto the shared base.
+
+    A flank supplied for this ORF (manifest column or folder file) wins over the
+    global flank, whether that global flank was a file or an entered sequence --
+    so the two forms can never both reach pamscan for the same side.
+    """
+    kwargs = dict(base)
+    kwargs.update(orf)
+    for side in ("5", "3"):
+        if _is_set(orf.get("flank%s_file_path" % side)):
+            kwargs.pop("flank%s_sequence" % side, None)
+    return kwargs
 
 
 def main(argv=None):
@@ -344,7 +411,8 @@ def main(argv=None):
 
     Handles a single ORF, a ``--manifest`` TSV, or an ``--orf-dir`` folder. In the
     batch modes, any 5'/3' flank not given per ORF falls back to a global
-    ``--flank5``/``--flank3`` flag, so global and per-ORF flanks both work.
+    ``--flank5``/``--flank3`` flag (or ``--flank5-seq``/``--flank3-seq``), so
+    global and per-ORF flanks both work.
     """
     base, args = build_kwargs(argv)
     if args.manifest and args.orf_dir:
@@ -367,8 +435,7 @@ def main(argv=None):
     if orfs is not None:
         total = len(orfs)
         for i, orf in enumerate(orfs, start=1):
-            kwargs = dict(base)
-            kwargs.update(orf)                       # per-ORF fields override the shared base
+            kwargs = _merge_orf(base, orf)           # per-ORF fields override the shared base
             _validate(kwargs)
             print("=== PAM scan %d/%d: %s ===" % (i, total, kwargs.get("geneName")))
             pamscan(**kwargs)

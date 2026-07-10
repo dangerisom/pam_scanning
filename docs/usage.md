@@ -9,8 +9,10 @@ All three share the same parameters and produce the same output.
 | CLI flag | kwarg | Default | Description |
 | --- | --- | --- | --- |
 | `--orf` | `orf_file_path` | *(required, per ORF)* | ORF FASTA, ATG → stop. |
-| `--flank5` | `flank5_file_path` | *(required, per ORF)* | FASTA of the 100 bp immediately **upstream** of the ATG (the `-` side). Lets the scan reach positions at the start of the ORF. |
-| `--flank3` | `flank3_file_path` | *(required, per ORF)* | FASTA of the 100 bp immediately **downstream** of the stop (the `+` side). Lets the scan reach positions at the end of the ORF. |
+| `--flank5` | `flank5_file_path` | *(one flank per side required)* | FASTA of the 100 bp immediately **upstream** of the ATG (the `-` side). Lets the scan reach positions at the start of the ORF. |
+| `--flank5-seq` | `flank5_sequence` | *(one flank per side required)* | The 5′ flank as a literal sequence instead of a FASTA file (A/C/G/T/N; a pasted FASTA record or base numbering is tolerated). Mutually exclusive with `--flank5`. |
+| `--flank3` | `flank3_file_path` | *(one flank per side required)* | FASTA of the 100 bp immediately **downstream** of the stop (the `+` side). Lets the scan reach positions at the end of the ORF. |
+| `--flank3-seq` | `flank3_sequence` | *(one flank per side required)* | The 3′ flank as a literal sequence instead of a FASTA file. Mutually exclusive with `--flank3`. |
 | `--manifest` | *(n/a)* | *(none)* | TSV of ORFs (one row each) for batch runs; see [Multiple ORFs](#multiple-orfs). |
 | `--genome` | `local_genome_file_path` | *(required)* | Host genome FASTA for off-target checks. |
 | `--blast-db` | `localBlastDb` | `yeast` | Local BLAST+ database. A bare name (e.g. `yeast`) is resolved via `$BLASTDB`; a path prefix or a path to any member file (e.g. `/data/yeast.nin`) is accepted and reduced to the prefix. In the GUI this is a **Browse** button — pick any database file and the prefix path is used. |
@@ -94,18 +96,29 @@ Files whose suffix matches no role are ignored with a warning.
 
 Flanks can be supplied **per ORF** (each ORF row/file has its own 5′/3′ flank) or
 **globally** (one 5′/3′ pair applied to every ORF). For global flanks, omit the
-per-ORF flank columns/files and pass `--flank5`/`--flank3` once; they fill in for
-any ORF that doesn't specify its own.
+per-ORF flank columns/files and pass a global flank once; it fills in for any ORF
+that doesn't specify its own. A global flank can be either a FASTA file
+(`--flank5`/`--flank3`) or a literal sequence (`--flank5-seq`/`--flank3-seq`):
 
 ```bash
-# Global flanks shared by every ORF in the folder:
+# Global flanks (from files) shared by every ORF in the folder:
 pam-scan --orf-dir examples/orf_folder \
     --flank5 shared_flank5.fa --flank3 shared_flank3.fa \
     --genome genome.fsa --blast-db yeast --output ./results
+
+# The same, giving the flanks as sequences instead of files:
+pam-scan --orf-dir examples/orf_folder \
+    --flank5-seq "$(cat shared_flank5.txt)" --flank3-seq ACGT...100bp \
+    --genome genome.fsa --blast-db yeast --output ./results
 ```
+
+A per-ORF flank (from a manifest row or a folder file) always takes precedence
+over a global flank for that ORF and side.
 
 In the GUI, use **+ Add ORF** to queue ORFs one at a time or **Load folder…** to
 discover them, and choose **Per-ORF flanks** or **Global flanks** under *Flank inputs*.
+In global mode each flank has a **From file** / **Enter sequence** toggle; the
+sequence box shows a live base count (and reads *invalid* on a non-DNA character).
 
 ## Output
 
@@ -117,7 +130,7 @@ under `--output`, containing:
 | `QC/‹gene›-guideSolutions.xlsx` | Per-codon optimal guide, silenced guide, cut gap, PAM inclusions, and insertion primers. |
 | `QC/‹gene›-scannableSequence.txt` | Fraction of the ORF that is PAM-scannable, plus the masked sequence and affected codons. |
 | `QC/solutionsFasta/‹gene›-‹codon›.fa` | SnapGene-viewable silenced ORF for each insertion site. |
-| `QC/` (copies) | The input ORF and 5′/3′ flank FASTA files, plus the assembled `‹gene›-orfPlusContext.fa`, for provenance. |
+| `QC/` (copies) | The input ORF and 5′/3′ flank FASTA files (a flank entered as a sequence is written out as `‹gene›-flank5.fa`/`‹gene›-flank3.fa`), plus the assembled `‹gene›-orfPlusContext.fa`, for provenance. |
 | `ORDER/‹gene›-primerOrder.xlsx` | Plate-laid-out guide + insertion primer order (96- or 384-well). |
 | `BLAST+/` | Raw and final `blastn` query/result files for off-target review. |
 | `WARNINGS/‹gene›-pamInclusionWarnings*.txt` | Guides carrying potential PAM inclusions (conservative + super-conservative). |

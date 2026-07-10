@@ -3,17 +3,43 @@
 Collects run parameters through a themed form with hover help and hands them to
 :func:`pam_scanning.chimeras.pamscan`. One or more ORFs can be queued; each ORF
 has its own gene name and ORF FASTA, plus either its own 5'/3' flanks (per-ORF
-mode) or a single global 5'/3' flank pair shared by every ORF (global mode). The
-genome, codon table, primer suffixes, and scan parameters are always shared. ORFs
-can be added one at a time or discovered from a folder. Launch with ``pam-scan-gui``.
+mode) or a single global 5'/3' flank pair shared by every ORF (global mode). Each
+global flank is taken from a FASTA file or from a sequence typed/pasted straight
+into the form. The genome, codon table, primer suffixes, and scan parameters are
+always shared. ORFs can be added one at a time or discovered from a folder.
+Launch with ``pam-scan-gui``.
 """
 
+import json
+import os
 import threading
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, font as tkfont
-from os import getcwd
+from pathlib import Path
 
+from pam_scanning.chimeras import parse_sequence_text
 from pam_scanning.cli import blast_db_prefix, discover_orf_folder
+
+# Where the last-used dialog directory is remembered between sessions.
+_STATE_PATH = Path.home() / ".pam_scanning" / "gui_state.json"
+
+
+def _load_last_dir():
+    """Return the directory the last file dialog used, or the cwd if none/stale."""
+    try:
+        saved = json.loads(_STATE_PATH.read_text()).get("last_dir")
+    except (OSError, ValueError):
+        saved = None
+    return saved if saved and os.path.isdir(saved) else os.getcwd()
+
+
+def _save_last_dir(path):
+    """Persist the last-used dialog directory; ignore any I/O failure."""
+    try:
+        _STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        _STATE_PATH.write_text(json.dumps({"last_dir": path}))
+    except OSError:
+        pass
 
 # ---------------------------------------------------------------------------
 # Palette and field definitions
@@ -30,6 +56,7 @@ ACCENT = "#2e7d32"      # primary action (Run)
 ACCENT_ACTIVE = "#256628"
 TIP_BG = "#fffbe6"
 TIP_BORDER = "#c9b458"
+INVALID = "#b00020"     # sequence box holds non-DNA characters
 PLACEHOLDER = "No file selected"
 
 # Per-ORF flank inputs (used only in per-ORF flank mode).
@@ -44,14 +71,22 @@ ORF_FLANK_FIELDS = [
 ]
 
 # Global flank inputs (used only in global flank mode; one pair for every ORF).
+# Each tuple: (key, section label, short name for buttons/messages, tooltip). The
+# pamscan kwarg is '<key>_file_path' or '<key>_sequence' depending on the source.
 GLOBAL_FLANK_FIELDS = [
-    ("flank5_file_path", "Global 5' flank  (100 bp -)",
-     "A single 5' flank FASTA (100 bp upstream of the ATG) applied to EVERY ORF. Use when all "
-     "ORFs share the same upstream context."),
-    ("flank3_file_path", "Global 3' flank  (100 bp +)",
-     "A single 3' flank FASTA (100 bp downstream of the stop) applied to EVERY ORF. Use when "
-     "all ORFs share the same downstream context."),
+    ("flank5", "Global 5' flank  (100 bp -)", "5' flank",
+     "A single 5' flank (100 bp upstream of the ATG) applied to EVERY ORF. Use when all "
+     "ORFs share the same upstream context. Open a FASTA file, or enter the sequence directly."),
+    ("flank3", "Global 3' flank  (100 bp +)", "3' flank",
+     "A single 3' flank (100 bp downstream of the stop) applied to EVERY ORF. Use when "
+     "all ORFs share the same downstream context. Open a FASTA file, or enter the sequence directly."),
 ]
+
+# Help shown on a global flank's sequence box.
+SEQUENCE_TIP = (
+    "Type or paste the flank sequence (A, C, G, T, or N). A pasted FASTA record, line breaks, "
+    "and base numbering from a sequence viewer are all accepted -- they are stripped. The base "
+    "count is shown to the right and reads 'invalid' if a non-DNA character is present.")
 
 # Shared file inputs (apply to every ORF).
 SHARED_FILE_FIELDS = [
@@ -225,14 +260,31 @@ def main():
 
     # Shared state variables.
     shared_file_vars = {key: tk.StringVar(value=PLACEHOLDER) for key, _, _ in SHARED_FILE_FIELDS}
-    global_flank_vars = {key: tk.StringVar(value=PLACEHOLDER) for key, _, _ in GLOBAL_FLANK_FIELDS}
+    # Each global flank has a source ("file" or "sequence") and a variable per source.
+    global_flank_source = {key: tk.StringVar(value="file") for key, _, _, _ in GLOBAL_FLANK_FIELDS}
+    global_flank_path_vars = {key: tk.StringVar(value=PLACEHOLDER) for key, _, _, _ in GLOBAL_FLANK_FIELDS}
+    global_flank_seq_vars = {key: tk.StringVar(value="") for key, _, _, _ in GLOBAL_FLANK_FIELDS}
+    global_flank_widgets = {}                    # key -> {"file": [...], "sequence": [...]}
     blast_db_var = tk.StringVar(value="yeast")   # BLAST -db prefix (name or browsed path)
     string_vars = {key: tk.StringVar(value=default) for key, _, default, _ in STRING_FIELDS}
     int_vars = {key: tk.StringVar(value=str(default)) for key, _, default, _ in INT_FIELDS}
-    output_var = tk.StringVar(value=getcwd())
+    output_var = tk.StringVar(value=os.getcwd())
     status_var = tk.StringVar(value="Ready.")
     flank_mode = tk.StringVar(value="per_orf")   # "per_orf" or "global"
     orf_entries = []   # one dict of StringVars (+ widgets) per queued ORF
+
+    # Every file/folder dialog opens at the last directory used, remembered across
+    # sessions. A single shared memory means the app stays wherever you last were.
+    dialog_dir = {"path": _load_last_dir()}
+
+    def remember_dir(chosen):
+        """After a dialog picks `chosen`, point the next dialog at its directory."""
+        if not chosen:
+            return
+        directory = chosen if os.path.isdir(chosen) else os.path.dirname(chosen)
+        if directory:
+            dialog_dir["path"] = directory
+            _save_last_dir(directory)
 
     # --- Scrollable body so the form fits any screen ---------------------
     outer = ttk.Frame(root, style="TFrame")
@@ -293,8 +345,9 @@ def main():
         path_lbl.grid(row=row, column=0, sticky="we", padx=(14, 6), pady=10)
 
         def browse(v=var):
-            chosen = filedialog.askopenfilename(initialdir=getcwd())
+            chosen = filedialog.askopenfilename(initialdir=dialog_dir["path"])
             if chosen:
+                remember_dir(chosen)
                 v.set(chosen)
 
         btn = ttk.Button(card, text="Browse  " + button_label, style="Browse.TButton",
@@ -337,8 +390,57 @@ def main():
     global_flank_holder.pack(fill="x")
     global_flank_card = ttk.Frame(global_flank_holder, style="Card.TFrame")
     global_flank_card.columnconfigure(0, weight=1)
-    for r, (key, blabel, tip) in enumerate(GLOBAL_FLANK_FIELDS):
-        add_file_row(global_flank_card, r, blabel, tip, global_flank_vars[key])
+
+    def refresh_global_flank_source(*_):
+        """Show the Browse row or the sequence box, per flank, per selected source."""
+        for key, widgets in global_flank_widgets.items():
+            from_file = global_flank_source[key].get() == "file"
+            shown, hidden = ("file", "sequence") if from_file else ("sequence", "file")
+            for w in widgets[shown]:
+                w.grid()
+            for w in widgets[hidden]:
+                w.grid_remove()
+
+    def add_global_flank(card, base_row, key, label, short, tip):
+        """Build one global flank: a File/Sequence toggle over a Browse row and a sequence box."""
+        head = ttk.Frame(card, style="Card.TFrame")
+        head.grid(row=base_row, column=0, columnspan=2, sticky="we", padx=14, pady=(10, 0))
+        head_lbl = ttk.Label(head, text=label, style="Field.TLabel")
+        head_lbl.pack(side="left")
+        source = global_flank_source[key]
+        ttk.Radiobutton(head, text="Enter sequence", value="sequence", variable=source,
+                        style="Mode.TRadiobutton").pack(side="right")
+        ttk.Radiobutton(head, text="From file", value="file", variable=source,
+                        style="Mode.TRadiobutton").pack(side="right", padx=(0, 16))
+        attach_tip(head_lbl, tip)
+
+        file_widgets = add_file_row(card, base_row + 1, short, tip, global_flank_path_vars[key])
+
+        seq_var = global_flank_seq_vars[key]
+        seq_entry = ttk.Entry(card, textvariable=seq_var, font=f_mono)
+        seq_entry.grid(row=base_row + 2, column=0, sticky="we", padx=(14, 6), pady=10)
+        length_lbl = ttk.Label(card, text="0 bp", style="Path.TLabel", anchor="e", width=12)
+        length_lbl.grid(row=base_row + 2, column=1, sticky="e", padx=(6, 14), pady=10)
+        attach_tip(seq_entry, SEQUENCE_TIP, length_lbl)
+
+        def update_length(*_):
+            """Echo the parsed base count so a mistyped/short flank is obvious before running."""
+            text = seq_var.get().strip()
+            if not text:
+                length_lbl.config(text="0 bp", foreground=MUTED)
+                return
+            try:
+                length_lbl.config(text="%d bp" % len(parse_sequence_text(text)), foreground=MUTED)
+            except ValueError:
+                length_lbl.config(text="invalid", foreground=INVALID)
+
+        seq_var.trace_add("write", update_length)
+        source.trace_add("write", refresh_global_flank_source)
+        global_flank_widgets[key] = {"file": file_widgets, "sequence": [seq_entry, length_lbl]}
+
+    for i, (key, label, short, tip) in enumerate(GLOBAL_FLANK_FIELDS):
+        add_global_flank(global_flank_card, i * 3, key, label, short, tip)
+    refresh_global_flank_source()
 
     # --- ORFs (one or more) ---------------------------------------------
     ttk.Label(content, text="ORFs", style="Section.TLabel").pack(anchor="w", pady=(14, 6))
@@ -443,9 +545,10 @@ def main():
         side="left", padx=(0, 8))
 
     def load_folder():
-        folder = filedialog.askdirectory(initialdir=getcwd())
+        folder = filedialog.askdirectory(initialdir=dialog_dir["path"])
         if not folder:
             return
+        remember_dir(folder)
         try:
             orfs, skipped = discover_orf_folder(folder)
         except OSError as exc:
@@ -493,9 +596,10 @@ def main():
 
     def browse_blast_db():
         chosen = filedialog.askopenfilename(
-            initialdir=getcwd(),
+            initialdir=dialog_dir["path"],
             title="Select any file of your BLAST database (e.g. yeast.nin)")
         if chosen:
+            remember_dir(chosen)
             blast_db_var.set(blast_db_prefix(chosen))
 
     db_btn = ttk.Button(card, text="Browse  Local BLAST database", style="Browse.TButton",
@@ -525,8 +629,9 @@ def main():
     out_lbl.grid(row=0, column=0, sticky="we", padx=(14, 6), pady=10)
 
     def browse_dir():
-        chosen = filedialog.askdirectory(initialdir=getcwd())
+        chosen = filedialog.askdirectory(initialdir=dialog_dir["path"])
         if chosen:
+            remember_dir(chosen)
             output_var.set(chosen)
 
     out_btn = ttk.Button(card, text="Choose directory", style="Browse.TButton",
@@ -551,8 +656,20 @@ def main():
         shared.update({key: var.get() for key, var in string_vars.items()})
         shared["localBlastDb"] = blast_db_prefix(blast_db_var.get())
         if flank_mode.get() == "global":
-            for key, var in global_flank_vars.items():
-                shared[key] = var.get()
+            # Send exactly one kwarg per flank, so pamscan never sees file+sequence.
+            for key, _label, short, _tip in GLOBAL_FLANK_FIELDS:
+                if global_flank_source[key].get() == "file":
+                    shared[key + "_file_path"] = global_flank_path_vars[key].get()
+                    continue
+                text = global_flank_seq_vars[key].get().strip()
+                if not text:
+                    shared[key + "_sequence"] = ""   # validate() reports the empty box
+                    continue
+                try:
+                    shared[key + "_sequence"] = parse_sequence_text(text, "%s sequence" % short)
+                except ValueError as exc:
+                    messagebox.showerror("Invalid sequence", str(exc))
+                    return None
         for key, var in int_vars.items():
             text = var.get().strip()
             if not text:
@@ -589,10 +706,18 @@ def main():
             messagebox.showerror("Missing input", "Please add at least one ORF.")
             return False
         if flank_mode.get() == "global":
-            if not _is_set(shared.get("flank5_file_path")) or not _is_set(shared.get("flank3_file_path")):
-                messagebox.showerror("Missing input",
-                                     "Global flank mode: please select both global 5' and 3' flanks.")
-                return False
+            for key, _label, short, _tip in GLOBAL_FLANK_FIELDS:
+                if global_flank_source[key].get() == "file":
+                    if not _is_set(shared.get(key + "_file_path")):
+                        messagebox.showerror(
+                            "Missing input",
+                            "Global flank mode: please select the %s FASTA file." % short)
+                        return False
+                elif not shared.get(key + "_sequence"):
+                    messagebox.showerror(
+                        "Missing input",
+                        "Global flank mode: please enter the %s sequence." % short)
+                    return False
         for i, orf in enumerate(orfs, start=1):
             if not orf["geneName"].strip():
                 messagebox.showerror("Missing input", "Please enter a gene name for ORF %d." % i)

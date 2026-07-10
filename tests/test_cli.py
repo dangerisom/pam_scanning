@@ -50,6 +50,50 @@ def test_validate_passes_for_complete_single_orf():
     cli._validate(base)  # should not raise
 
 
+def test_flank_sequence_flag_is_parsed_and_normalized():
+    base, _ = cli.build_kwargs([
+        "--orf", ORF, "--flank5-seq", "> hdr\nac gt\nNNN", "--flank3", FLANK3,
+        "--genome", ORF, "--gene-name", "Fus3",
+    ])
+    # Header, whitespace stripped; upper-cased; file-path form left unset.
+    assert base["flank5_sequence"] == "ACGTNNN"
+    assert base.get("flank5_file_path") is None
+    cli._validate(base)  # a sequence flank satisfies the requirement
+
+
+def test_flank_file_and_sequence_are_mutually_exclusive():
+    with pytest.raises(SystemExit):
+        cli.build_kwargs([
+            "--orf", ORF, "--flank5", FLANK5, "--flank5-seq", "ACGT",
+            "--flank3", FLANK3, "--genome", ORF, "--gene-name", "Fus3",
+        ])
+
+
+def test_invalid_flank_sequence_exits_early():
+    with pytest.raises(SystemExit):
+        cli.build_kwargs([
+            "--orf", ORF, "--flank5-seq", "ACGTX", "--flank3", FLANK3,
+            "--genome", ORF, "--gene-name", "Fus3",
+        ])
+
+
+def test_validate_requires_a_flank_in_each_direction():
+    base, _ = cli.build_kwargs([
+        "--orf", ORF, "--flank5-seq", "ACGT",
+        "--genome", ORF, "--gene-name", "Fus3",
+    ])
+    with pytest.raises(SystemExit):
+        cli._validate(base)  # no 3' flank, file or sequence
+
+
+def test_per_orf_flank_file_overrides_global_sequence():
+    base = {"flank5_sequence": "AAAA", "flank3_sequence": "TTTT", "geneName": "shared"}
+    merged = cli._merge_orf(base, {"flank5_file_path": "/data/GeneA_flank5.fa"})
+    assert merged["flank5_file_path"] == "/data/GeneA_flank5.fa"
+    assert "flank5_sequence" not in merged      # file wins; no clash reaches pamscan
+    assert merged["flank3_sequence"] == "TTTT"  # untouched side keeps the global sequence
+
+
 def test_manifest_parses_rows_and_resolves_paths(tmp_path):
     manifest = tmp_path / "orfs.tsv"
     # Relative paths must resolve against the manifest's own directory.

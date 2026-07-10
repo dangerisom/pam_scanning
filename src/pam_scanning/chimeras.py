@@ -4,7 +4,27 @@
 (:mod:`pam_scanning.cli`) and the Tkinter GUI (:mod:`pam_scanning.gui`). It takes
 the run parameters as keyword arguments, runs the full pipeline implemented in
 :mod:`pam_scanning.library`, and writes a time-stamped results directory.
+
+Each 5'/3' flank may be supplied either as a FASTA file (``flank5_file_path`` /
+``flank3_file_path``) or as a literal sequence (``flank5_sequence`` /
+``flank3_sequence``), but not both for the same side. Sequences that were typed
+or pasted rather than read from a file are written into the QC directory as
+FASTA so every run remains fully reproducible from its own output.
 """
+
+import re
+
+
+# Sentinel written by the GUI (and defaulted by the CLI) for an unset path.
+NOT_SELECTED = "No file selected"
+
+# The pipeline operates on unambiguous DNA; 'N' is tolerated in flanking context.
+_DNA_BASES = frozenset("ACGTN")
+
+
+def _is_provided(value):
+	"""True when a path/sequence kwarg holds a real value rather than a sentinel."""
+	return bool(value) and value != NOT_SELECTED
 
 
 def default_codon_table_path():
@@ -12,6 +32,27 @@ def default_codon_table_path():
 	from importlib import resources
 
 	return str(resources.files("pam_scanning") / "data" / "codon_tables" / "yeast_64_1_1_all_nuclear.cusp.txt")
+
+
+def parse_sequence_text(text, label="sequence"):
+	"""Parse typed or pasted sequence text into a bare uppercase DNA string.
+
+	Accepts a raw sequence or a whole pasted FASTA record: '>' header lines are
+	dropped, and whitespace plus any base-numbering digits (as pasted from
+	sequence viewers) are removed. Raises :class:`ValueError` if the result is
+	empty or holds anything other than A, C, G, T, or N.
+	"""
+	body = [line for line in str(text).splitlines() if not line.lstrip().startswith(">")]
+	sequence = re.sub(r"[\s\d]", "", "".join(body)).upper()
+	if not sequence:
+		raise ValueError("The %s is empty." % label)
+	invalid = sorted(set(sequence) - _DNA_BASES)
+	if invalid:
+		raise ValueError(
+			"The %s contains non-DNA character(s): %s (expected A, C, G, T, or N)."
+			% (label, ", ".join(invalid))
+		)
+	return sequence
 
 
 def _read_fasta_sequence(path):
@@ -35,13 +76,42 @@ def _read_fasta_sequence(path):
 	return seq.upper()  # Initial sequence must be uppercase for functions to work properly...
 
 
+def _resolve_flank(sequence, path, label):
+	"""Return the flank sequence, from a literal sequence or a FASTA file."""
+	if _is_provided(sequence) and _is_provided(path):
+		raise ValueError(
+			"Supply the %s flank either as a FASTA file or as a sequence, not both." % label
+		)
+	if _is_provided(sequence):
+		return parse_sequence_text(sequence, "%s flank sequence" % label)
+	return _read_fasta_sequence(path)
+
+
+def _write_flank_qc(qcPath, geneName, label, path, sequence):
+	"""Preserve the flank in QC: copy its FASTA, or write the entered sequence as one."""
+	from os import sep
+	from shutil import copyfile
+	from pam_scanning.library import fasta
+
+	if _is_provided(path):
+		copyfile(path, qcPath + path.split(sep)[-1])
+		return
+	output = open(qcPath + geneName + "-" + label + ".fa", "w")
+	output.write("> " + geneName + " | " + label + " (entered sequence)\n")
+	output.write(fasta(sequence))
+	output.close()
+
+
 def pamscan(**kwargs):
 
 	# Set **kwargs
 
 	orf_file_path = kwargs['orf_file_path']
-	flank5_file_path = kwargs['flank5_file_path']   # 100 bp upstream of the ATG (the "-" side)
-	flank3_file_path = kwargs['flank3_file_path']   # 100 bp downstream of the stop (the "+" side)
+	# Each flank arrives either as a FASTA path or as a literal sequence.
+	flank5_file_path = kwargs.get('flank5_file_path', NOT_SELECTED)   # 100 bp upstream of the ATG (the "-" side)
+	flank3_file_path = kwargs.get('flank3_file_path', NOT_SELECTED)   # 100 bp downstream of the stop (the "+" side)
+	flank5_sequence = kwargs.get('flank5_sequence')
+	flank3_sequence = kwargs.get('flank3_sequence')
 	local_genome_file_path = kwargs['local_genome_file_path']
 	codon_table_file_path = kwargs.get('codon_table_file_path', 'No file selected')
 	codon_selection_file_path = kwargs['codon_selection_file_path']
@@ -65,12 +135,12 @@ def pamscan(**kwargs):
 		print("ORF file is required")
 		return 0
 
-	if flank5_file_path == 'No file selected':
-		print("5' flank file (100 bp upstream of ATG) is required")
+	if not _is_provided(flank5_file_path) and not _is_provided(flank5_sequence):
+		print("5' flank (100 bp upstream of ATG) is required: give a FASTA file or a sequence")
 		return 0
 
-	if flank3_file_path == 'No file selected':
-		print("3' flank file (100 bp downstream of stop) is required")
+	if not _is_provided(flank3_file_path) and not _is_provided(flank3_sequence):
+		print("3' flank (100 bp downstream of stop) is required: give a FASTA file or a sequence")
 		return 0
 
 	if local_genome_file_path == 'No file selected':
@@ -132,9 +202,10 @@ def pamscan(**kwargs):
 	########################################################################################
 
 	# A) Get the ORF sequence (ATG to stop) and the 100 bp genomic flanks on each side.
+	# Flanks come from a FASTA file or straight from an entered sequence.
 	orfSequence = _read_fasta_sequence(orf_file_path)
-	flank5Sequence = _read_fasta_sequence(flank5_file_path)   # 100 bp upstream of the ATG
-	flank3Sequence = _read_fasta_sequence(flank3_file_path)   # 100 bp downstream of the stop
+	flank5Sequence = _resolve_flank(flank5_sequence, flank5_file_path, "5'")   # 100 bp upstream of the ATG
+	flank3Sequence = _resolve_flank(flank3_sequence, flank3_file_path, "3'")   # 100 bp downstream of the stop
 
 	# B) Assemble the ORF-plus-context sequence: 5' flank + ORF + 3' flank. This is the
 	# sequence the whole algorithm scans; building it from explicit flanks lets us reach
@@ -184,8 +255,8 @@ def pamscan(**kwargs):
 	# Copy the flanks and write the assembled ORF-plus-context sequence for QC checks...
 	########################################################################################
 
-	copyfile(flank5_file_path, qcPath + flank5_file_path.split(sep)[-1])
-	copyfile(flank3_file_path, qcPath + flank3_file_path.split(sep)[-1])
+	_write_flank_qc(qcPath, geneName, "flank5", flank5_file_path, flank5Sequence)
+	_write_flank_qc(qcPath, geneName, "flank3", flank3_file_path, flank3Sequence)
 	orfPlusOut = open(qcPath + geneName + "-orfPlusContext.fa", "w")
 	orfPlusOut.write("> " + geneName + " | ORF + 5' and 3' flanks (assembled)\n")
 	orfPlusOut.write(fasta(orfPlusSequence))

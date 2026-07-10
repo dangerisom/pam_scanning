@@ -98,14 +98,15 @@ pam-scan-gui
 A Tkinter form that collects the same parameters and runs the identical pipeline.
 Use **+ Add ORF** to queue ORFs one at a time, or **Load folder…** to discover a folder
 of them; the *Flank inputs* control switches between per-ORF and global 5′/3′ flanks.
+In global mode each flank can be loaded **From file** or typed in with **Enter sequence**.
 
 ## Inputs
 
 | Input | Description |
 | --- | --- |
 | ORF FASTA (`--orf`) | The coding sequence, ATG → stop. |
-| 5′ flank FASTA (`--flank5`) | The 100 bp immediately upstream of the ATG (the `-` side), so positions at the start of the ORF can be scanned. |
-| 3′ flank FASTA (`--flank3`) | The 100 bp immediately downstream of the stop (the `+` side), so positions at the end of the ORF can be scanned. |
+| 5′ flank (`--flank5` / `--flank5-seq`) | The 100 bp immediately upstream of the ATG (the `-` side), so positions at the start of the ORF can be scanned. Give a FASTA file or a literal sequence. |
+| 3′ flank (`--flank3` / `--flank3-seq`) | The 100 bp immediately downstream of the stop (the `+` side), so positions at the end of the ORF can be scanned. Give a FASTA file or a literal sequence. |
 | Genome FASTA (`--genome`) | Host genome used for off-target evaluation (also the source for your BLAST DB). |
 | Codon table | Codon-usage table; the bundled yeast table is used if omitted. |
 | Codon selection (optional) | `.xlsx` listing specific residues to target. |
