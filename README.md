@@ -82,6 +82,12 @@ files (`--orf-dir examples/orf_folder`), with the shared `--genome`/`--blast-db`
 Flanks can be given per ORF or shared globally via a single `--flank5`/`--flank3` pair;
 see [`docs/usage.md`](docs/usage.md#multiple-orfs).
 
+Working from **UniProt**? Those downloads are protein sequences, not coding DNA. The
+bundled `pam-scan-fetch-cds` command fetches each entry's CDS (via its RefSeq
+cross-reference, choosing the isoform that matches the canonical protein) and writes
+`‹gene›_coding.fa` ready for `--orf-dir`; see
+[`docs/usage.md`](docs/usage.md#preparing-orfs-from-uniprot-pam-scan-fetch-cds).
+
 All parameters can also be supplied via `--config run.toml` (or `run.json`); explicit
 flags override config values. Run `pam-scan --help` for the full list. The yeast codon
 table is bundled and used by default; supply `--codon-table` to override it, and

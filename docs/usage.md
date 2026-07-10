@@ -120,6 +120,41 @@ discover them, and choose **Per-ORF flanks** or **Global flanks** under *Flank i
 In global mode each flank has a **From file** / **Enter sequence** toggle; the
 sequence box shows a live base count (and reads *invalid* on a non-DNA character).
 
+## Preparing ORFs from UniProt (`pam-scan-fetch-cds`)
+
+PAM-scanning needs the **coding DNA** (ATG→stop), but UniProt distributes
+**protein** FASTA. The `pam-scan-fetch-cds` helper bridges the two so a folder of
+UniProt downloads becomes a folder of PAM-scannable ORFs:
+
+```bash
+# From a folder of UniProt protein FASTAs (accession read from each header):
+pam-scan-fetch-cds --protein-dir ./uniprot_fastas --email you@example.com
+
+# Or from explicit accessions, written to a chosen folder:
+pam-scan-fetch-cds P60709 P08183 P31749 -o ./orfs --email you@example.com
+```
+
+Each protein is resolved deterministically:
+
+1. the UniProt entry's **RefSeq** cross-reference gives the curated mRNA(s);
+2. when an entry has several mRNA isoforms, the one whose CDS **translates to the
+   UniProt canonical protein** is chosen (not an arbitrary first), so the exact
+   ORF is never guessed at;
+3. NCBI E-utilities returns that mRNA's CDS, written as `‹gene›_coding.fa` — the
+   name [`--orf-dir`](#folder---orf-dir) discovery recognizes.
+
+The stop codon is retained. Each file's header records provenance
+(`CDS from RefSeq NM_… (UniProt …)`), and any anomaly (no start ATG, no stop,
+frame, unmatched isoform) is reported per accession rather than silently written.
+`--email` is passed to NCBI as a courtesy and is recommended for large batches;
+`--delay` (default 0.34 s) keeps within NCBI's rate limit.
+
+> The helper writes `‹gene›_coding.fa` alongside (or into `-o`); the original
+> protein FASTAs, having no role suffix, are simply ignored by folder discovery.
+> Use **Global flanks** (a shared 5′/3′ pair) since these files carry no per-ORF
+> flanks. An internet connection is required (UniProt + NCBI); it is the only part
+> of PAM-scanning that goes online.
+
 ## Output
 
 Each run creates a time-stamped directory `‹gene›-chimera-insertions-‹YYYY.MM.DD-HH.MM.SS›/`

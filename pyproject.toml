@@ -29,6 +29,7 @@ Issues = "https://github.com/dangerisom/pam_scanning/issues"
 
 [project.scripts]
 pam-scan = "pam_scanning.cli:main"
+pam-scan-fetch-cds = "pam_scanning.fetch_cds:main"
 
 [project.gui-scripts]
 pam-scan-gui = "pam_scanning.gui:main"
