@@ -137,35 +137,8 @@ def set_codon_table(codon_table_file_path):
 			byRes[res].update({(percent,codon):codon})
 
 # def blastGuides(outputPath, geneName, guides, localBlastDb, localGenomeFilePath, pamInclusionSequenceThreshold=6, pamInclusionThreshold=5, final=0):
-def blastGuides(outputPath, geneName, guides, localBlastDb, localGenomeFilePath, pamInclusionSequenceThreshold=15, pamInclusionThreshold=5, final=0):
-
-	if final:
-		print("BLAST+: Calculating off-target potential for each FINAL guide sequence...")
-	else:
-		print("BLAST+: Calculating off-target potential for each guide sequence...")
-
-	# Arguments...
-	#
-	# outputPath: X
-	# geneName = X
-	# guides = X
-	# localBlastDb = X
-	# pamInclusionSequenceThreshold = X
-	# pamInclusionThreshold = Number of allowable PAM inclusions per guide. 
-
-	# This function will only work if you have NCBI BLAST+ 
-	# and the reference genome(s) installed on your computer...
-	# For instructions on how to set these things up, see blast_README.txt...
-	#
-	# Current localBlastDb options...
-	# "yeast" = S. cerevisiae (details)
-	# "pombe" = S. pombe (details)
-	# "human" = H. sapien (details)
-
-	########################################################################################
-	# Open and parse the reference genome file...
-	########################################################################################	
-
+def _parse_genome(localGenomeFilePath):
+	"""Parse a '>chrN' genome FASTA (one chromosome per line) into {chromosome: sequence}."""
 	genomeFile = open(localGenomeFilePath)
 	lines = genomeFile.readlines()
 	i, genome = 0, {}
@@ -176,49 +149,21 @@ def blastGuides(outputPath, geneName, guides, localBlastDb, localGenomeFilePath,
 			sequence = lines[i+1].strip()
 			genome[chromosome] = sequence
 		i += 1
+	return genome
 
-	########################################################################################
-	# Get the guides...
-	########################################################################################
 
-	guideKeys = sorted(guides)
-	if final:
-		guideFasta = open(outputPath + geneName + "-guidesBlast-final.fa", "w")
-	else:
-		guideFasta = open(outputPath + geneName + "-guidesBlast.fa", "w")
-	for guideKey in guideKeys:
-		guideFasta.write("> " + str(guideKey[0]) + " " + guides[guideKey] + " guide query" + "\n")
-		guideFasta.write(guides[guideKey] + "\n")
-	guideFasta.close()
+def _parse_blast_lines(lines, genome, pamInclusionSequenceThreshold, pamInclusionThreshold):
+	"""Evaluate one or more guides' BLAST -outfmt 1 result lines.
 
-	########################################################################################
-	# BLAST the guides against a locally built genome database...
-	########################################################################################
-
-	from subprocess import run
-	from os import cpu_count
-	# Parallelize the blastn search across CPU cores (leave one free for the UI/OS).
-	blastThreads = str(max(1, (cpu_count() or 2) - 1))
-	print("BLAST+: running blastn on %s CPU thread(s)..." % blastThreads)
-	if final:
-		run(["blastn", "-query", outputPath + geneName + "-guidesBlast-final.fa", "-task", "blastn-short", "-db", localBlastDb, "-out", outputPath + geneName + "-guidesBlastResult-final.txt", "-outfmt", "1", "-num_threads", blastThreads])
-	else:
-		run(["blastn", "-query", outputPath + geneName + "-guidesBlast.fa", "-task", "blastn-short", "-db", localBlastDb, "-out", outputPath + geneName + "-guidesBlastResult.txt", "-outfmt", "1", "-num_threads", blastThreads])
-
-	########################################################################################
-	# Parse results for threats of off-targeting cutting...
-	########################################################################################
-
-	# Open and Parse the BLAST results file...
-	if final:
-		blastResults = open(outputPath + geneName + "-guidesBlastResult-final.txt", "r")
-	else:
-		blastResults = open(outputPath + geneName + "-guidesBlastResult.txt", "r")
+	Pure and self-contained: each guide's 'Query=' block is independent, so this
+	runs on the whole file (serial) or on a single block (in a worker) with the
+	same result. Returns (safeGuides, unsafeGuides, pamInclusionsDict,
+	superConservativePamInclusionDict).
+	"""
 	safeGuides, unsafeGuides, keyedGuides = {}, {}, {}
-	i, collect, safeGuide, guideSequence, guideStartIndex, guideStopIndex, lines, pamInclusions, pamInclusionsDict, pamInclusionsDictTmp = 0, 0, 1, None, 0, 0, blastResults.readlines(), 0, {}, {}
+	i, collect, safeGuide, guideSequence, guideStartIndex, guideStopIndex, pamInclusions, pamInclusionsDict, pamInclusionsDictTmp = 0, 0, 1, None, 0, 0, 0, {}, {}
 	superConservativePamInclusionDict, superConservativePamInclusionDictTmp = {}, {}
 	partialGuide, internalGuideStartIndex, internalGuideStopIndex = None, 0, 0
-	guideCount, evalCounter = len(guideKeys), 0   # for "guide x of y" progress reporting
 	while i < len(lines):
 
 		# Get the file line...
@@ -229,8 +174,6 @@ def blastGuides(outputPath, geneName, guides, localBlastDb, localGenomeFilePath,
 		if "Query=" in line:
 			guideKey = int(line.split()[1])
 			guideSequence = line.split()[2]
-			evalCounter += 1
-			print("BLAST+: Evaluating guide %d of %d: %s" % (evalCounter, guideCount, guideSequence))
 
 		# Occasionally, no BLAST results are returned for a query sequence...
 		# In such a case, the guide is 100% safe...
@@ -725,6 +668,143 @@ def blastGuides(outputPath, geneName, guides, localBlastDb, localGenomeFilePath,
 
 		i += 1
 
+	return (safeGuides, unsafeGuides, pamInclusionsDict, superConservativePamInclusionDict)
+
+
+def _split_guide_blocks(lines):
+	"""Split BLAST -outfmt 1 output into one line-list per guide ('Query=' block)."""
+	starts = [k for k, line in enumerate(lines) if "Query=" in line]
+	if not starts:
+		return []
+	bounds = starts + [len(lines)]
+	return [lines[bounds[j]:bounds[j + 1]] for j in range(len(starts))]
+
+
+# Per-worker genome, parsed once via the pool initializer so the 12 MB genome is
+# not pickled for every task.
+_WORKER_GENOME = None
+_PARALLEL_MIN_BLOCKS = 24   # below this, a process pool costs more than it saves
+
+
+def _worker_init(localGenomeFilePath):
+	global _WORKER_GENOME
+	_WORKER_GENOME = _parse_genome(localGenomeFilePath)
+
+
+def _eval_block_worker(args):
+	block, pamInclusionSequenceThreshold, pamInclusionThreshold = args
+	return _parse_blast_lines(block, _WORKER_GENOME, pamInclusionSequenceThreshold, pamInclusionThreshold)
+
+
+def _evaluate_blocks(blocks, genome, localGenomeFilePath, pamInclusionSequenceThreshold, pamInclusionThreshold):
+	"""Evaluate each guide block, in parallel across CPU cores when worthwhile.
+
+	Falls back to a single core for small jobs or if the process pool cannot be
+	created, so a run always completes.
+	"""
+	from os import cpu_count
+	total = len(blocks)
+	workers = min(total, max(1, (cpu_count() or 2) - 1))
+	if total >= _PARALLEL_MIN_BLOCKS and workers >= 2:
+		try:
+			import multiprocessing
+			ctx = multiprocessing.get_context("spawn")
+			args = [(block, pamInclusionSequenceThreshold, pamInclusionThreshold) for block in blocks]
+			print("BLAST+: evaluating %d guides across %d CPU cores..." % (total, workers))
+			results = []
+			with ctx.Pool(processes=workers, initializer=_worker_init, initargs=(localGenomeFilePath,)) as pool:
+				for k, res in enumerate(pool.imap(_eval_block_worker, args), 1):
+					results.append(res)
+					print("BLAST+: evaluated guide %d of %d" % (k, total))
+			return results
+		except Exception as exc:   # never let a pool problem fail the run
+			print("BLAST+: parallel evaluation unavailable (%s); using a single core." % exc)
+	results = []
+	for k, block in enumerate(blocks, 1):
+		results.append(_parse_blast_lines(block, genome, pamInclusionSequenceThreshold, pamInclusionThreshold))
+		print("BLAST+: evaluated guide %d of %d" % (k, total))
+	return results
+
+
+def blastGuides(outputPath, geneName, guides, localBlastDb, localGenomeFilePath, pamInclusionSequenceThreshold=15, pamInclusionThreshold=5, final=0):
+
+	if final:
+		print("BLAST+: Calculating off-target potential for each FINAL guide sequence...")
+	else:
+		print("BLAST+: Calculating off-target potential for each guide sequence...")
+
+	# Arguments...
+	#
+	# outputPath: X
+	# geneName = X
+	# guides = X
+	# localBlastDb = X
+	# pamInclusionSequenceThreshold = X
+	# pamInclusionThreshold = Number of allowable PAM inclusions per guide. 
+
+	# This function will only work if you have NCBI BLAST+ 
+	# and the reference genome(s) installed on your computer...
+	# For instructions on how to set these things up, see blast_README.txt...
+	#
+	# Current localBlastDb options...
+	# "yeast" = S. cerevisiae (details)
+	# "pombe" = S. pombe (details)
+	# "human" = H. sapien (details)
+
+	########################################################################################
+	# Open and parse the reference genome file...
+	########################################################################################	
+
+	genome = _parse_genome(localGenomeFilePath)
+
+	########################################################################################
+	# Get the guides...
+	########################################################################################
+
+	guideKeys = sorted(guides)
+	if final:
+		guideFasta = open(outputPath + geneName + "-guidesBlast-final.fa", "w")
+	else:
+		guideFasta = open(outputPath + geneName + "-guidesBlast.fa", "w")
+	for guideKey in guideKeys:
+		guideFasta.write("> " + str(guideKey[0]) + " " + guides[guideKey] + " guide query" + "\n")
+		guideFasta.write(guides[guideKey] + "\n")
+	guideFasta.close()
+
+	########################################################################################
+	# BLAST the guides against a locally built genome database...
+	########################################################################################
+
+	from subprocess import run
+	from os import cpu_count
+	# Parallelize the blastn search across CPU cores (leave one free for the UI/OS).
+	blastThreads = str(max(1, (cpu_count() or 2) - 1))
+	print("BLAST+: running blastn on %s CPU thread(s)..." % blastThreads)
+	if final:
+		run(["blastn", "-query", outputPath + geneName + "-guidesBlast-final.fa", "-task", "blastn-short", "-db", localBlastDb, "-out", outputPath + geneName + "-guidesBlastResult-final.txt", "-outfmt", "1", "-num_threads", blastThreads])
+	else:
+		run(["blastn", "-query", outputPath + geneName + "-guidesBlast.fa", "-task", "blastn-short", "-db", localBlastDb, "-out", outputPath + geneName + "-guidesBlastResult.txt", "-outfmt", "1", "-num_threads", blastThreads])
+
+	########################################################################################
+	# Parse results for threats of off-targeting cutting...
+	########################################################################################
+
+	# Open and Parse the BLAST results file...
+	if final:
+		blastResults = open(outputPath + geneName + "-guidesBlastResult-final.txt", "r")
+	else:
+		blastResults = open(outputPath + geneName + "-guidesBlastResult.txt", "r")
+	# Read the BLAST results and evaluate each guide's hits, in parallel across CPU
+	# cores when there are enough guides to make a process pool worthwhile.
+	lines = blastResults.readlines()
+	blocks = _split_guide_blocks(lines)
+	results = _evaluate_blocks(blocks, genome, localGenomeFilePath, pamInclusionSequenceThreshold, pamInclusionThreshold)
+	safeGuides, unsafeGuides, pamInclusionsDict, superConservativePamInclusionDict = {}, {}, {}, {}
+	for _sG, _uG, _pI, _sc in results:
+		safeGuides.update(_sG)
+		unsafeGuides.update(_uG)
+		pamInclusionsDict.update(_pI)
+		superConservativePamInclusionDict.update(_sc)
 	return (safeGuides, unsafeGuides, pamInclusionsDict, superConservativePamInclusionDict)
 
 def getOptiGuides(codons, guides, orfPlusSequence, maxPamCutGap, optiGuideInclusionsDict):
