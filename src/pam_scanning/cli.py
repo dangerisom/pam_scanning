@@ -136,6 +136,9 @@ def _build_parser():
                    help="Optional .xlsx of specific insertion sites (overrides sampling). [single ORF]")
     p.add_argument("-o", "--output", dest="outputPath", default=".",
                    help="Directory to write the time-stamped results into.")
+    p.add_argument("--install-blast", dest="install_blast", action="store_true",
+                   help="If BLAST+ ('blastn') is missing, download the official NCBI binaries "
+                        "into ~/.pam_scanning/blast (no conda needed) instead of exiting.")
 
     # String parameters.
     p.add_argument("--gene-name", dest="geneName", help="Label used in output filenames. [single ORF]")
@@ -316,15 +319,30 @@ def discover_orf_folder(path):
     return orfs, skipped
 
 
-def _check_blast():
-    """Ensure the external NCBI BLAST+ 'blastn' executable is available."""
-    if shutil.which("blastn") is None:
-        sys.exit(
-            "Error: 'blastn' (NCBI BLAST+) was not found on your PATH.\n"
-            "PAM-scanning requires BLAST+ for off-target evaluation.\n"
-            "Install it with conda (recommended):  conda install -c bioconda blast\n"
-            "or see https://www.ncbi.nlm.nih.gov/books/NBK279690/"
-        )
+def _check_blast(install=False):
+    """Ensure the external NCBI BLAST+ 'blastn' executable is available.
+
+    With *install* set, BLAST+ is installed via conda/bioconda if it is missing;
+    otherwise a missing 'blastn' exits with instructions (including how to let the
+    tool install it).
+    """
+    from pam_scanning import blast_setup
+
+    if blast_setup.ensure_available() is not None:
+        return
+    if install:
+        try:
+            blast_setup.install_blast(log=lambda text: print(text, end=""))
+        except RuntimeError as exc:
+            sys.exit("Error: %s" % exc)
+        return
+    sys.exit(
+        "Error: 'blastn' (NCBI BLAST+) was not found on your PATH.\n"
+        "PAM-scanning requires BLAST+ for off-target evaluation.\n"
+        "Let this tool download it for you:     pam-scan ... --install-blast\n"
+        "or install it yourself with conda:     conda install -c bioconda blast\n"
+        "or see https://www.ncbi.nlm.nih.gov/books/NBK279690/"
+    )
 
 
 def build_kwargs(argv=None):
@@ -341,7 +359,7 @@ def build_kwargs(argv=None):
 
     # Flags explicitly provided on the command line override config/defaults.
     for key, value in vars(args).items():
-        if key in ("config", "manifest", "orf_dir") or value is None:
+        if key in ("config", "manifest", "orf_dir", "install_blast") or value is None:
             continue
         kwargs[key] = value
 
@@ -431,7 +449,7 @@ def main(argv=None):
     base, args = build_kwargs(argv)
     if args.manifest and args.orf_dir:
         sys.exit("Error: use either --manifest or --orf-dir, not both.")
-    _check_blast()
+    _check_blast(install=args.install_blast)
 
     from pam_scanning.chimeras import pamscan
 

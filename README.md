@@ -53,6 +53,9 @@ pip install pam_scanning
 `pip` does **not** install BLAST+ — install it separately (e.g.
 `conda install -c bioconda blast`, or from the
 [NCBI BLAST+ executables](https://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/LATEST/)).
+If `blastn` is missing when you run a scan, the GUI offers to download BLAST+ for you
+(and the CLI accepts `--install-blast`) — the official NCBI binaries are placed in
+`~/.pam_scanning/blast`, with no conda required and nothing added to your environment.
 
 ## Prerequisites: a local BLAST database
 

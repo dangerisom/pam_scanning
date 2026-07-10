@@ -12,6 +12,20 @@ The simplest route is conda (this is what `environment.yml` does for you):
 conda install -c bioconda blast
 ```
 
+**Or let PAM-scanning install it for you.** If you run a scan and `blastn` isn't
+found, the **GUI** offers to download BLAST+ automatically, streaming progress to
+the console. On the command line, add `--install-blast`:
+
+```bash
+pam-scan --orf-dir ./orfs --genome genome.fsa --blast-db yeast --install-blast
+```
+
+This downloads the official NCBI BLAST+ binaries for your platform into
+`~/.pam_scanning/blast` and puts just that folder on `PATH` for the run — **no
+conda required**, and nothing is added to any conda environment or your shell
+profile. The download is reused on later runs. (It also installs `makeblastdb`,
+which you need for step 2 below.)
+
 Alternatively, download the platform installer from the
 [NCBI BLAST+ releases](https://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/LATEST/)
 and ensure `blastn` and `makeblastdb` are on your `PATH`:

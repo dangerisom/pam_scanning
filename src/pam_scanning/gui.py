@@ -948,15 +948,7 @@ def main():
             messagebox.showinfo("PAM scan complete",
                                 "Output for %d ORF(s) written under:\n%s" % (n, out_path))
 
-    def run_scan():
-        shared = collect_shared()
-        if shared is None:
-            return
-        orfs = collect_orfs()
-        if not validate(shared, orfs):
-            return
-        run_button.config(state="disabled")
-        clear_console()
+    def start_scan_worker(shared, orfs):
         out_path = shared["outputPath"]
         n = len(orfs)
 
@@ -978,6 +970,52 @@ def main():
                 root.after(0, lambda e=exc: finish(e, out_path, n))
 
         threading.Thread(target=worker, daemon=True).start()
+
+    def blast_install_failed(exc):
+        run_button.config(state="normal")
+        status_var.set("BLAST+ install failed — see console.")
+        console_error("\n%s\n" % exc)
+        messagebox.showerror("BLAST+ install failed", str(exc))
+
+    def ensure_blast_then_scan(shared, orfs):
+        """Run the scan; if BLAST+ is missing, offer to install it first."""
+        from pam_scanning import blast_setup
+
+        if blast_setup.ensure_available() is not None:
+            start_scan_worker(shared, orfs)
+            return
+        if not messagebox.askyesno(
+                "BLAST+ not found",
+                "BLAST+ (blastn) is required for off-target screening but was not found on "
+                "this computer.\n\nDownload it now automatically? The official NCBI BLAST+ "
+                "binaries are placed in ~/.pam_scanning/blast — nothing is added to conda or "
+                "your environment. This may take a few minutes; progress is shown in the "
+                "console."):
+            run_button.config(state="normal")
+            status_var.set("BLAST+ is required to run a scan.")
+            return
+        status_var.set("Downloading BLAST+…")
+        console_banner("===== Installing BLAST+ (NCBI) =====\n")
+
+        def worker():
+            try:
+                blast_setup.install_blast(log=console_log)
+                root.after(0, lambda: start_scan_worker(shared, orfs))
+            except Exception as exc:
+                root.after(0, lambda e=exc: blast_install_failed(e))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def run_scan():
+        shared = collect_shared()
+        if shared is None:
+            return
+        orfs = collect_orfs()
+        if not validate(shared, orfs):
+            return
+        run_button.config(state="disabled")
+        clear_console()
+        ensure_blast_then_scan(shared, orfs)
 
     run_button.config(command=run_scan)
 

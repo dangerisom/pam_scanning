@@ -225,6 +225,35 @@ def test_manifest_and_orf_dir_are_mutually_exclusive():
         cli.main(["--manifest", "m.tsv", "--orf-dir", "d", "--genome", "g.fsa"])
 
 
+# --- BLAST availability check ----------------------------------------------
+
+def test_check_blast_exits_when_missing_without_install(monkeypatch):
+    from pam_scanning import blast_setup
+    monkeypatch.setattr(blast_setup, "ensure_available", lambda: None)
+    with pytest.raises(SystemExit, match="install-blast"):
+        cli._check_blast(install=False)
+
+
+def test_check_blast_passes_when_present(monkeypatch):
+    from pam_scanning import blast_setup
+    monkeypatch.setattr(blast_setup, "ensure_available", lambda: "/usr/bin/blastn")
+    cli._check_blast(install=False)   # should not raise
+
+
+def test_check_blast_installs_when_requested(monkeypatch):
+    from pam_scanning import blast_setup
+    calls = {"installed": False}
+    monkeypatch.setattr(blast_setup, "ensure_available", lambda: None)
+
+    def fake_install(log):
+        calls["installed"] = True
+        return "/home/u/.pam_scanning/blast/ncbi-blast/bin/blastn"
+
+    monkeypatch.setattr(blast_setup, "install_blast", fake_install)
+    cli._check_blast(install=True)
+    assert calls["installed"] is True
+
+
 # --- BLAST database prefix -------------------------------------------------
 
 def test_blast_db_prefix_strips_member_extensions():
