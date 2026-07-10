@@ -34,6 +34,19 @@ import urllib.request
 UNIPROT_URL = "https://rest.uniprot.org/uniprotkb/{acc}.json"
 EFETCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
 
+# Transient-failure retry policy for the HTTP helpers. UniProt/NCBI occasionally
+# return 5xx or briefly drop connections; a few backed-off retries ride that out.
+_MAX_RETRIES = 3
+_RETRY_BACKOFF = 1.0   # seconds; the wait before attempt N is backoff * 2**(N-1)
+
+
+class ServiceUnavailable(RuntimeError):
+    """A remote service (UniProt/NCBI) was unreachable after all retries.
+
+    Distinct from a per-accession failure so a batch can stop early instead of
+    retrying every remaining item against a service that is plainly down.
+    """
+
 # A UniProt FASTA header looks like '>sp|P60709|ACTB_HUMAN ...' or '>tr|A0A...|...';
 # capture the middle accession field. Bare accessions are matched directly.
 _HEADER_ACCESSION = re.compile(r">?(?:sp|tr)\|([^|]+)\|")
@@ -205,18 +218,35 @@ def wrap_fasta(sequence, width=70):
 
 # --- Network -----------------------------------------------------------------
 
-def _http_get(url, params=None, timeout=30):
-    """GET a URL and return decoded text, with a descriptive error on failure."""
+def _http_get(url, params=None, timeout=30, retries=_MAX_RETRIES, backoff=_RETRY_BACKOFF):
+    """GET a URL and return decoded text.
+
+    Transient failures -- HTTP 5xx, dropped connections, timeouts -- are retried
+    with exponential backoff. Client errors (HTTP 4xx, e.g. an unknown accession)
+    are permanent and fail at once. When the retries are exhausted a descriptive
+    :class:`RuntimeError` is raised.
+    """
     if params:
         url = url + "?" + urllib.parse.urlencode(params)
     request = urllib.request.Request(url, headers={"User-Agent": "pam_scanning/1.0"})
-    try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            return response.read().decode("utf-8")
-    except urllib.error.HTTPError as exc:
-        raise RuntimeError("HTTP %s for %s" % (exc.code, url)) from exc
-    except urllib.error.URLError as exc:
-        raise RuntimeError("Could not reach %s (%s)" % (url, exc.reason)) from exc
+    for attempt in range(retries + 1):
+        last = attempt == retries
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                return response.read().decode("utf-8")
+        except urllib.error.HTTPError as exc:
+            if exc.code < 500:      # 4xx: permanent, don't retry
+                raise RuntimeError("HTTP %s for %s" % (exc.code, url)) from exc
+            if last:
+                raise ServiceUnavailable(
+                    "Service temporarily unavailable (HTTP %s) for %s -- try again later."
+                    % (exc.code, url)) from exc
+        except OSError as exc:      # URLError, timeouts, connection errors
+            if last:
+                reason = getattr(exc, "reason", exc)
+                raise ServiceUnavailable(
+                    "Could not reach %s (%s) -- try again later." % (url, reason)) from exc
+        time.sleep(backoff * (2 ** attempt))
 
 
 def fetch_uniprot_entry(accession, timeout=30):
@@ -381,12 +411,19 @@ def main(argv=None):
     if not todo:
         sys.exit("Error: no UniProt accessions to fetch.")
 
-    total, written, failed = len(todo), 0, 0
+    total, written, failed, aborted = len(todo), 0, 0, 0
     for i, (accession, source) in enumerate(todo, start=1):
         label = accession if source == accession else "%s (%s)" % (accession, source)
         print("[%d/%d] %s" % (i, total, label))
         try:
             result = fetch_cds_for_accession(accession, timeout=args.timeout, email=args.email)
+        except ServiceUnavailable as exc:
+            # The service itself is down: stop rather than retry every remaining item.
+            aborted = total - i + 1
+            print("  %s" % exc, file=sys.stderr)
+            print("Aborting: the remote service is unavailable; %d accession(s) not attempted."
+                  % (aborted - 1), file=sys.stderr)
+            break
         except (RuntimeError, LookupError, ValueError) as exc:
             print("  Failed: %s" % exc, file=sys.stderr)
             failed += 1
@@ -399,8 +436,11 @@ def main(argv=None):
         if i < total and args.delay > 0:
             time.sleep(args.delay)
 
-    print("\nDone: %d written, %d failed, into %s" % (written, failed, out_dir))
-    return 1 if failed and not written else 0
+    summary = "\nDone: %d written, %d failed" % (written, failed)
+    if aborted:
+        summary += ", %d not attempted (service down)" % (aborted - 1)
+    print("%s, into %s" % (summary, out_dir))
+    return 1 if (failed or aborted) and not written else 0
 
 
 if __name__ == "__main__":

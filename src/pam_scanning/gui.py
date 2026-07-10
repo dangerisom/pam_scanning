@@ -709,6 +709,14 @@ def main():
                     console_log("    -> %s  %s [%d bp]\n"
                                 % (result.gene, result.refseq_id, len(result.sequence)))
                     written.append(result.gene)
+                except fetch_cds.ServiceUnavailable as exc:
+                    # Service is down: stop rather than retry every remaining gene.
+                    remaining = len(proteins) - i - 1
+                    console_error("    %s\n" % exc)
+                    console_error("  Aborting: UniProt/NCBI is unavailable; %d gene(s) not "
+                                  "attempted.\n" % remaining)
+                    failed.append("%s (service unavailable)" % name)
+                    break
                 except Exception as exc:   # per-file: report and keep going
                     console_error("    failed: %s\n" % exc)
                     failed.append("%s (%s)" % (name, exc))

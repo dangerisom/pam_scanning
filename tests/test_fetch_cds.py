@@ -6,10 +6,94 @@ represented by small synthetic fixtures mirroring the real response shapes.
 """
 
 import os
+import urllib.error
 
 import pytest
 
 from pam_scanning import fetch_cds as fc
+
+
+class _FakeResponse:
+    """Minimal stand-in for a urlopen response usable as a context manager."""
+
+    def __init__(self, body):
+        self._body = body
+
+    def read(self):
+        return self._body.encode("utf-8")
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+def _patch_urlopen(monkeypatch, handler):
+    """Route fetch_cds's urlopen through *handler* and make backoff sleeps instant."""
+    monkeypatch.setattr(fc.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(fc.urllib.request, "urlopen", handler)
+
+
+# --- HTTP retry / backoff --------------------------------------------------
+
+def test_http_get_retries_transient_5xx_then_succeeds(monkeypatch):
+    calls = {"n": 0}
+
+    def handler(request, timeout=30):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise urllib.error.HTTPError(request.full_url, 503, "busy", None, None)
+        return _FakeResponse("OK")
+
+    _patch_urlopen(monkeypatch, handler)
+    assert fc._http_get("http://x", retries=3, backoff=0) == "OK"
+    assert calls["n"] == 3   # two failures, then success
+
+
+def test_http_get_does_not_retry_client_errors(monkeypatch):
+    calls = {"n": 0}
+
+    def handler(request, timeout=30):
+        calls["n"] += 1
+        raise urllib.error.HTTPError(request.full_url, 404, "not found", None, None)
+
+    _patch_urlopen(monkeypatch, handler)
+    with pytest.raises(RuntimeError, match="HTTP 404"):
+        fc._http_get("http://x", retries=3, backoff=0)
+    assert calls["n"] == 1   # 4xx is permanent: no retry
+
+
+def test_http_get_gives_up_on_persistent_5xx_with_clear_message(monkeypatch):
+    calls = {"n": 0}
+
+    def handler(request, timeout=30):
+        calls["n"] += 1
+        raise urllib.error.HTTPError(request.full_url, 500, "err", None, None)
+
+    _patch_urlopen(monkeypatch, handler)
+    with pytest.raises(fc.ServiceUnavailable, match="temporarily unavailable"):
+        fc._http_get("http://x", retries=2, backoff=0)
+    assert calls["n"] == 3   # retries + 1 attempts
+
+
+def test_service_unavailable_is_a_runtimeerror():
+    # Batch loops catch it specifically to abort, but generic handlers still work.
+    assert issubclass(fc.ServiceUnavailable, RuntimeError)
+
+
+def test_http_get_retries_connection_errors(monkeypatch):
+    calls = {"n": 0}
+
+    def handler(request, timeout=30):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise urllib.error.URLError("connection reset")
+        return _FakeResponse("DATA")
+
+    _patch_urlopen(monkeypatch, handler)
+    assert fc._http_get("http://x", retries=3, backoff=0) == "DATA"
+    assert calls["n"] == 2
 
 
 # --- Accession parsing -----------------------------------------------------
