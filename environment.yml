@@ -1,11 +1,20 @@
 name: pam_scanning
+# Cross-platform environment that installs everything PAM-scanning needs:
+# Python, the Tkinter GUI, NCBI BLAST+ (the 'blastn'/'makeblastdb' executables),
+# and the pam_scanning package itself. Create it with:
+#
+#     conda env create -f environment.yml
+#     conda activate pam_scanning
+#     pam-scan-gui            # or: pam-scan --help
+#
+# (The double-click launchers in launchers/ do this for you.)
 channels:
   - conda-forge
   - bioconda
 dependencies:
-  - python >=3.8
+  - python >=3.9
   - openpyxl
-  - blast            # provides the 'blastn' executable used for off-target checks
+  - blast >=2.12        # NCBI BLAST+: provides blastn (and makeblastdb)
   - pip
   - pip:
-      - -e .
+      - .               # install pam_scanning -> the pam-scan / pam-scan-gui commands

@@ -19,6 +19,14 @@ This is the reference implementation accompanying the PAM-scanning manuscript.
 PAM-scanning depends on the external **NCBI BLAST+** toolkit (`blastn`), which is most
 easily obtained through conda. The recommended path is therefore conda.
 
+### Easiest (for lab members / non-coders)
+
+Install [Miniforge](https://conda-forge.org/download/) once, then double-click the
+launcher for your computer in [`launchers/`](launchers):
+**`PAM Scanning.command`** (Mac) or **`PAM Scanning.bat`** (Windows). The first run
+sets everything up automatically (Python, the app, and BLAST+); after that it just
+opens the graphical app. Step-by-step guide: [`INSTALL.md`](INSTALL.md).
+
 ### conda (recommended)
 
 ```bash
