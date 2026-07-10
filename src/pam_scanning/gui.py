@@ -10,8 +10,10 @@ always shared. ORFs can be added one at a time or discovered from a folder.
 Launch with ``pam-scan-gui``.
 """
 
+import contextlib
 import json
 import os
+import queue
 import threading
 import time
 import tkinter as tk
@@ -24,6 +26,26 @@ from pam_scanning.cli import blast_db_prefix, discover_orf_folder
 
 # FASTA extensions the folder loader inspects (matches cli.discover_orf_folder).
 _FASTA_EXTS = (".fa", ".fasta", ".fna", ".fas")
+
+
+class _ConsoleWriter:
+    """A minimal stdout-like sink that forwards written text to a callback.
+
+    Used with :func:`contextlib.redirect_stdout` so the pipeline's ``print``
+    progress is captured and shown in the GUI's console instead of the terminal.
+    The callback is expected to be thread-safe (it enqueues for the UI thread).
+    """
+
+    def __init__(self, sink):
+        self._sink = sink
+
+    def write(self, text):
+        if text:
+            self._sink(text)
+        return len(text)
+
+    def flush(self):
+        pass
 
 # Where the last-used dialog directory is remembered between sessions.
 _STATE_PATH = Path.home() / ".pam_scanning" / "gui_state.json"
@@ -62,6 +84,9 @@ ACCENT_ACTIVE = "#256628"
 TIP_BG = "#fffbe6"
 TIP_BORDER = "#c9b458"
 INVALID = "#b00020"     # sequence box holds non-DNA characters
+CONSOLE_BG = "#0f1b28"  # progress console background
+CONSOLE_FG = "#d7e0ea"  # progress console text
+CONSOLE_MUTED = "#7f93a8"
 PLACEHOLDER = "No file selected"
 
 # Per-ORF flank inputs (used only in per-ORF flank mode).
@@ -206,7 +231,8 @@ def main():
     root = tk.Tk()
     root.title("PAM Scanning")
     root.configure(bg=BG)
-    root.minsize(900, 840)
+    root.minsize(1180, 840)
+    root.geometry("1360x900")
 
     # Fonts.
     base = tkfont.nametofont("TkDefaultFont")
@@ -243,6 +269,9 @@ def main():
     style.configure("OrfHead.TLabel", background=CARD, foreground=HEADER_BG, font=f_section)
     style.configure("Path.TLabel", background=CARD, foreground=MUTED, font=f_label)
     style.configure("Status.TLabel", background=BG, foreground=MUTED, font=f_subtitle)
+    style.configure("Console.TFrame", background=CONSOLE_BG)
+    style.configure("ConsoleHead.TFrame", background=HEADER_BG)
+    style.configure("ConsoleHead.TLabel", background=HEADER_BG, foreground=HEADER_FG, font=f_section)
     style.configure("Mode.TRadiobutton", background=CARD, foreground=TEXT, font=f_label)
     style.map("Mode.TRadiobutton", background=[("active", CARD)])
     style.configure("TEntry", fieldbackground="#ffffff", padding=4)
@@ -283,6 +312,21 @@ def main():
     # sessions. A single shared memory means the app stays wherever you last were.
     dialog_dir = {"path": _load_last_dir()}
 
+    # Progress console: worker threads enqueue text; the UI thread drains it.
+    console_queue = queue.Queue()
+
+    def console_log(text):
+        """Thread-safe: queue *text* for the progress console (no trailing newline added)."""
+        console_queue.put(text)
+
+    def console_banner(text):
+        """Queue a highlighted banner line (e.g. a stage or ORF header)."""
+        console_queue.put((text, "banner"))
+
+    def console_error(text):
+        """Queue an error-styled line."""
+        console_queue.put((text, "error"))
+
     def remember_dir(chosen):
         """After a dialog picks `chosen`, point the next dialog at its directory."""
         if not chosen:
@@ -296,8 +340,13 @@ def main():
     outer = ttk.Frame(root, style="TFrame")
     outer.pack(fill="both", expand=True)
 
-    canvas = tk.Canvas(outer, background=BG, highlightthickness=0)
-    scrollbar = ttk.Scrollbar(outer, orient="vertical", command=canvas.yview)
+    # Split the window: the scrollable form on the left, a live console on the right.
+    paned = ttk.PanedWindow(outer, orient="horizontal")
+    paned.pack(fill="both", expand=True)
+
+    form_pane = ttk.Frame(paned, style="TFrame")
+    canvas = tk.Canvas(form_pane, background=BG, highlightthickness=0)
+    scrollbar = ttk.Scrollbar(form_pane, orient="vertical", command=canvas.yview)
     body = ttk.Frame(canvas, style="TFrame")
     body.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
     body_window = canvas.create_window((0, 0), window=body, anchor="nw")
@@ -305,6 +354,7 @@ def main():
     canvas.configure(yscrollcommand=scrollbar.set)
     canvas.pack(side="left", fill="both", expand=True)
     scrollbar.pack(side="right", fill="y")
+    paned.add(form_pane, weight=3)
 
     def _on_mousewheel(event):
         canvas.yview_scroll(int(-1 * (event.delta or (120 if event.num == 4 else -120)) / 120), "units")
@@ -312,6 +362,66 @@ def main():
     canvas.bind_all("<MouseWheel>", _on_mousewheel)
     canvas.bind_all("<Button-4>", _on_mousewheel)
     canvas.bind_all("<Button-5>", _on_mousewheel)
+
+    # --- Progress console (right pane) -----------------------------------
+    console_pane = ttk.Frame(paned, style="Console.TFrame")
+    console_head = ttk.Frame(console_pane, style="ConsoleHead.TFrame")
+    console_head.pack(fill="x")
+    ttk.Label(console_head, text="Progress", style="ConsoleHead.TLabel").pack(
+        side="left", padx=14, pady=9)
+
+    def clear_console():
+        console.configure(state="normal")
+        console.delete("1.0", "end")
+        console.configure(state="disabled")
+
+    ttk.Button(console_head, text="Clear", style="Small.TButton", command=clear_console).pack(
+        side="right", padx=10, pady=7)
+
+    console_wrap = ttk.Frame(console_pane, style="Console.TFrame")
+    console_wrap.pack(fill="both", expand=True)
+    console = tk.Text(
+        console_wrap, background=CONSOLE_BG, foreground=CONSOLE_FG, insertbackground=CONSOLE_FG,
+        font=f_mono, wrap="word", relief="flat", borderwidth=0, padx=12, pady=10,
+        width=48, height=20, state="disabled", highlightthickness=0,
+    )
+    console_scroll = ttk.Scrollbar(console_wrap, orient="vertical", command=console.yview)
+    console.configure(yscrollcommand=console_scroll.set)
+    console_scroll.pack(side="right", fill="y")
+    console.pack(side="left", fill="both", expand=True)
+    console.tag_configure("banner", foreground="#8fd3ff")
+    console.tag_configure("muted", foreground=CONSOLE_MUTED)
+    console.tag_configure("error", foreground="#ff9a8f")
+    paned.add(console_pane, weight=2)
+
+    def _append_console(text, tag=None):
+        console.configure(state="normal")
+        console.insert("end", text, tag or ())
+        console.see("end")
+        console.configure(state="disabled")
+
+    # Scroll the console over itself; return "break" so it doesn't also move the form.
+    def _console_wheel(event):
+        console.yview_scroll(int(-1 * (event.delta or (120 if event.num == 4 else -120)) / 120), "units")
+        return "break"
+
+    console.bind("<MouseWheel>", _console_wheel)
+    console.bind("<Button-4>", _console_wheel)
+    console.bind("<Button-5>", _console_wheel)
+
+    def drain_console():
+        try:
+            while True:
+                item = console_queue.get_nowait()
+                if isinstance(item, tuple):
+                    _append_console(item[0], item[1])
+                else:
+                    _append_console(item)
+        except queue.Empty:
+            pass
+        root.after(120, drain_console)
+
+    drain_console()
 
     # --- Header banner ---------------------------------------------------
     header = ttk.Frame(body, style="Header.TFrame")
@@ -582,18 +692,25 @@ def main():
         """Fetch a CDS from UniProt for each protein file, then re-discover the folder."""
         status_var.set("Fetching %d coding sequence(s) from UniProt…" % len(proteins))
         folder_btn.config(state="disabled")
+        clear_console()
+        console_banner("===== Fetching %d coding sequence(s) from UniProt =====\n" % len(proteins))
 
         def worker():
             written, failed = [], []
             for i, (name, _path, accession) in enumerate(proteins):
                 if not accession:
+                    console_error("  %s: no UniProt accession in header\n" % name)
                     failed.append("%s (no UniProt accession in header)" % name)
                     continue
+                console_log("  %s (%s): fetching…\n" % (name, accession))
                 try:
                     result = fetch_cds.fetch_cds_for_accession(accession)
                     fetch_cds.write_coding_fasta(folder, result)
+                    console_log("    -> %s  %s [%d bp]\n"
+                                % (result.gene, result.refseq_id, len(result.sequence)))
                     written.append(result.gene)
                 except Exception as exc:   # per-file: report and keep going
+                    console_error("    failed: %s\n" % exc)
                     failed.append("%s (%s)" % (name, exc))
                 if i < len(proteins) - 1:
                     time.sleep(0.34)       # respect NCBI's rate limit
@@ -831,24 +948,33 @@ def main():
         if not validate(shared, orfs):
             return
         run_button.config(state="disabled")
+        clear_console()
         out_path = shared["outputPath"]
         n = len(orfs)
 
         def worker():
+            writer = _ConsoleWriter(console_log)
             try:
                 from pam_scanning.chimeras import pamscan
-                for i, orf in enumerate(orfs, start=1):
-                    msg = "Running ORF %d/%d (%s)… progress is printed to the console." % (
-                        i, n, orf["geneName"])
-                    root.after(0, lambda m=msg: status_var.set(m))
-                    pamscan(**dict(shared, **orf))
+                with contextlib.redirect_stdout(writer):
+                    for i, orf in enumerate(orfs, start=1):
+                        console_banner("\n===== ORF %d/%d: %s =====\n" % (i, n, orf["geneName"]))
+                        msg = "Running ORF %d/%d (%s)… see the progress console." % (
+                            i, n, orf["geneName"])
+                        root.after(0, lambda m=msg: status_var.set(m))
+                        pamscan(**dict(shared, **orf))
+                console_banner("\n===== Done: %d ORF(s) written =====\n" % n)
                 root.after(0, lambda: finish(None, out_path, n))
             except Exception as exc:  # surface any failure back on the UI thread
+                console_error("\nError: %s\n" % exc)
                 root.after(0, lambda e=exc: finish(e, out_path, n))
 
         threading.Thread(target=worker, daemon=True).start()
 
     run_button.config(command=run_scan)
+
+    # Bias the initial split toward the form; the sash stays user-draggable.
+    root.after(60, lambda: paned.sashpos(0, 840))
 
     root.mainloop()
 

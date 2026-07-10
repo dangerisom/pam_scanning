@@ -225,7 +225,7 @@ def pamscan(**kwargs):
 	# Root calculation results path...
 	# outputPath = ".." + sep + "calculationResults" + sep
 	outputPath += sep
-	print("This is the output path", outputPath)
+	print("Writing results to:", outputPath)
 	if not exists(outputPath):
 		mkdir(outputPath)
 	outputPath += geneName + "-chimera-insertions-" + timeStamp + sep
@@ -300,10 +300,12 @@ def pamscan(**kwargs):
 	# Identify and attempt to silence PAM sites...
 	########################################################################################
 
+	print("Finding PAM sites and candidate guides...")
 	result = findPamSites(orfPlusSequence, orfStartIndex, orfStartIndex + len(orfSequence))
 	guidesF, guidesR = result[0], result[1]
 	guides = guidesF
 	guides.update(guidesR)
+	print("Silencing PAM sites...")
 	result = tryToPamSilence(orfPlusSequence, orfStartIndex, orfEndIndex, guides)
 	silencedGuides, unsilencedGuides = result[0], result[1]
 
@@ -311,6 +313,7 @@ def pamscan(**kwargs):
 	# Attempt to GUIDE silence any guide that cannot be PAM silenced...
 	########################################################################################
 
+	print("Guide-silencing any remaining guides...")
 	guideSilencers = guideSilence(orfPlusSequence, orfStartIndex, unsilencedGuides)
 	silencedGuides.update(guideSilencers)
 	for key in silencedGuides:
@@ -338,6 +341,7 @@ def pamscan(**kwargs):
 
 	# Identify the optimal safeguide for each codon (post BLAST verification)....
 	# This information is used to calculate total PAM-scannable sequence for the ORF...
+	print("Selecting the optimal guide for each codon...")
 	optiGuidesAllCodons = getOptiGuides(allCodons, guides, orfPlusSequence, maxPamCutGap, pamInclusionsDict)
 	keys, tmpGuides, tmpSilencedGuides = sorted(optiGuidesAllCodons), {}, {}
 	for key in keys:
@@ -501,6 +505,7 @@ def pamscan(**kwargs):
 	# Create the primer order...
 	########################################################################################
 
+	print("Writing primer order and QC files...")
 	createPrimerOrder(orderPath, microplateDimensions, geneName, primerOrderGuides, primerOrderInserts)
 
 	########################################################################################
