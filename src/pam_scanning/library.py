@@ -196,10 +196,14 @@ def blastGuides(outputPath, geneName, guides, localBlastDb, localGenomeFilePath,
 	########################################################################################
 
 	from subprocess import run
+	from os import cpu_count
+	# Parallelize the blastn search across CPU cores (leave one free for the UI/OS).
+	blastThreads = str(max(1, (cpu_count() or 2) - 1))
+	print("BLAST+: running blastn on %s CPU thread(s)..." % blastThreads)
 	if final:
-		run(["blastn", "-query", outputPath + geneName + "-guidesBlast-final.fa", "-task", "blastn-short", "-db", localBlastDb, "-out", outputPath + geneName + "-guidesBlastResult-final.txt", "-outfmt", "1"])
+		run(["blastn", "-query", outputPath + geneName + "-guidesBlast-final.fa", "-task", "blastn-short", "-db", localBlastDb, "-out", outputPath + geneName + "-guidesBlastResult-final.txt", "-outfmt", "1", "-num_threads", blastThreads])
 	else:
-		run(["blastn", "-query", outputPath + geneName + "-guidesBlast.fa", "-task", "blastn-short", "-db", localBlastDb, "-out", outputPath + geneName + "-guidesBlastResult.txt", "-outfmt", "1"])
+		run(["blastn", "-query", outputPath + geneName + "-guidesBlast.fa", "-task", "blastn-short", "-db", localBlastDb, "-out", outputPath + geneName + "-guidesBlastResult.txt", "-outfmt", "1", "-num_threads", blastThreads])
 
 	########################################################################################
 	# Parse results for threats of off-targeting cutting...
@@ -214,6 +218,7 @@ def blastGuides(outputPath, geneName, guides, localBlastDb, localGenomeFilePath,
 	i, collect, safeGuide, guideSequence, guideStartIndex, guideStopIndex, lines, pamInclusions, pamInclusionsDict, pamInclusionsDictTmp = 0, 0, 1, None, 0, 0, blastResults.readlines(), 0, {}, {}
 	superConservativePamInclusionDict, superConservativePamInclusionDictTmp = {}, {}
 	partialGuide, internalGuideStartIndex, internalGuideStopIndex = None, 0, 0
+	guideCount, evalCounter = len(guideKeys), 0   # for "guide x of y" progress reporting
 	while i < len(lines):
 
 		# Get the file line...
@@ -224,7 +229,8 @@ def blastGuides(outputPath, geneName, guides, localBlastDb, localGenomeFilePath,
 		if "Query=" in line:
 			guideKey = int(line.split()[1])
 			guideSequence = line.split()[2]
-			print("BLAST+: Evaluating off-target BLAST results for guide sequence: ", guideSequence)
+			evalCounter += 1
+			print("BLAST+: Evaluating guide %d of %d: %s" % (evalCounter, guideCount, guideSequence))
 
 		# Occasionally, no BLAST results are returned for a query sequence...
 		# In such a case, the guide is 100% safe...
@@ -406,7 +412,7 @@ def blastGuides(outputPath, geneName, guides, localBlastDb, localGenomeFilePath,
 							for gKey in gKeys:
 								result = genome[gKey].find(blastCheck)
 								if result != -1:
-									resultIndex = genome[gKey].index(blastCheck)
+									resultIndex = result
 									blastCheckExtended = genome[gKey][resultIndex-1:resultIndex+len(blastCheck)]
 									# print()
 									# print(1, blastCheck)
@@ -425,7 +431,7 @@ def blastGuides(outputPath, geneName, guides, localBlastDb, localGenomeFilePath,
 
 								result = genome[gKey].find(reverseComplement(blastCheck))
 								if result != -1:
-									resultIndex = genome[gKey].index(reverseComplement(blastCheck))
+									resultIndex = result
 									blastCheckExtended = genome[gKey][resultIndex:resultIndex+len(blastCheck)+1]
 									# print()
 									# print("reversed...")
@@ -492,7 +498,7 @@ def blastGuides(outputPath, geneName, guides, localBlastDb, localGenomeFilePath,
 							for gKey in gKeys:
 								result = genome[gKey].find(blastCheck)
 								if result != -1:
-									resultIndex = genome[gKey].index(blastCheck)
+									resultIndex = result
 									#blastCheckExtended = genome[gKey][resultIndex-1:resultIndex+len(blastCheck)]
 									blastCheckExtended = genome[gKey][resultIndex:resultIndex+len(blastCheck)+1]
 									# print()
@@ -512,7 +518,7 @@ def blastGuides(outputPath, geneName, guides, localBlastDb, localGenomeFilePath,
 
 								result = genome[gKey].find(reverseComplement(blastCheck))
 								if result != -1:
-									resultIndex = genome[gKey].index(reverseComplement(blastCheck))
+									resultIndex = result
 									#blastCheckExtended = genome[gKey][resultIndex:resultIndex+len(blastCheck)+1]
 									blastCheckExtended = genome[gKey][resultIndex-1:resultIndex+len(blastCheck)]
 									# print()
@@ -585,7 +591,7 @@ def blastGuides(outputPath, geneName, guides, localBlastDb, localGenomeFilePath,
 							for gKey in gKeys:
 								result = genome[gKey].find(blastCheck)
 								if result != -1:
-									resultIndex = genome[gKey].index(blastCheck)
+									resultIndex = result
 									blastCheckExtended = genome[gKey][resultIndex-1:resultIndex+len(blastCheck)]
 									# print()
 									# print(1, blastCheck)
@@ -604,7 +610,7 @@ def blastGuides(outputPath, geneName, guides, localBlastDb, localGenomeFilePath,
 
 								result = genome[gKey].find(reverseComplement(blastCheck))
 								if result != -1:
-									resultIndex = genome[gKey].index(reverseComplement(blastCheck))
+									resultIndex = result
 									blastCheckExtended = genome[gKey][resultIndex:resultIndex+len(blastCheck)+1]
 									# print()
 									# print("reversed...")
@@ -666,7 +672,7 @@ def blastGuides(outputPath, geneName, guides, localBlastDb, localGenomeFilePath,
 							for gKey in gKeys:
 								result = genome[gKey].find(blastCheck)
 								if result != -1:
-									resultIndex = genome[gKey].index(blastCheck)
+									resultIndex = result
 									#blastCheckExtended = genome[gKey][resultIndex-1:resultIndex+len(blastCheck)]
 									blastCheckExtended = genome[gKey][resultIndex:resultIndex+len(blastCheck)+1]
 									# print()
@@ -686,7 +692,7 @@ def blastGuides(outputPath, geneName, guides, localBlastDb, localGenomeFilePath,
 
 								result = genome[gKey].find(reverseComplement(blastCheck))
 								if result != -1:
-									resultIndex = genome[gKey].index(reverseComplement(blastCheck))
+									resultIndex = result
 									#blastCheckExtended = genome[gKey][resultIndex:resultIndex+len(blastCheck)+1]
 									blastCheckExtended = genome[gKey][resultIndex-1:resultIndex+len(blastCheck)]
 									# print()

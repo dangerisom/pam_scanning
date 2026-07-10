@@ -123,7 +123,8 @@ SHARED_FILE_FIELDS = [
     ("local_genome_file_path", "Genome sequence",
      "The yeast host genome (FASTA) used for off-target evaluation. PAM scanning is always "
      "performed in yeast -- the ORF is ported in from its source organism -- so this is always "
-     "a yeast genome; use it to select the yeast species, strain, or variant."),
+     "a yeast genome. Defaults to the bundled BY4741 genome; Browse to choose a different "
+     "yeast species, strain, or variant."),
     ("codon_table_file_path", "Codon table (optional)",
      "Codon-usage table for the host genome. Leave unset to use the bundled yeast table "
      "(yeast_64_1_1_all_nuclear.cusp.txt)."),
@@ -295,6 +296,12 @@ def main():
 
     # Shared state variables.
     shared_file_vars = {key: tk.StringVar(value=PLACEHOLDER) for key, _, _ in SHARED_FILE_FIELDS}
+    # Default the genome to the bundled yeast genome (decompressed on first use).
+    try:
+        from pam_scanning.chimeras import default_genome_path
+        shared_file_vars["local_genome_file_path"].set(default_genome_path())
+    except Exception:   # never let a packaging hiccup stop the GUI from opening
+        pass
     # Each global flank has a source ("file" or "sequence") and a variable per source.
     global_flank_source = {key: tk.StringVar(value="file") for key, _, _, _ in GLOBAL_FLANK_FIELDS}
     global_flank_path_vars = {key: tk.StringVar(value=PLACEHOLDER) for key, _, _, _ in GLOBAL_FLANK_FIELDS}
@@ -356,8 +363,25 @@ def main():
     scrollbar.pack(side="right", fill="y")
     paned.add(form_pane, weight=3)
 
+    def _wheel_steps(event):
+        """Scroll direction/magnitude across platforms (trackpad, touch mouse, wheel).
+
+        Linux uses Button-4/5; Windows sends delta in multiples of 120; macOS sends
+        small integer deltas (~1-3) — dividing those by 120 rounds to 0, which is why
+        trackpad scrolling did nothing before.
+        """
+        if event.num == 4:
+            return -1
+        if event.num == 5:
+            return 1
+        if abs(event.delta) >= 120:            # Windows
+            return -1 * int(event.delta / 120)
+        return -1 * event.delta                # macOS trackpad / wheel
+
     def _on_mousewheel(event):
-        canvas.yview_scroll(int(-1 * (event.delta or (120 if event.num == 4 else -120)) / 120), "units")
+        step = _wheel_steps(event)
+        if step:
+            canvas.yview_scroll(step, "units")
 
     canvas.bind_all("<MouseWheel>", _on_mousewheel)
     canvas.bind_all("<Button-4>", _on_mousewheel)
@@ -402,7 +426,9 @@ def main():
 
     # Scroll the console over itself; return "break" so it doesn't also move the form.
     def _console_wheel(event):
-        console.yview_scroll(int(-1 * (event.delta or (120 if event.num == 4 else -120)) / 120), "units")
+        step = _wheel_steps(event)
+        if step:
+            console.yview_scroll(step, "units")
         return "break"
 
     console.bind("<MouseWheel>", _console_wheel)
@@ -461,7 +487,13 @@ def main():
         path_lbl.grid(row=row, column=0, sticky="we", padx=(14, 6), pady=10)
 
         def browse(v=var):
-            chosen = filedialog.askopenfilename(initialdir=dialog_dir["path"])
+            # Open where this field already points (e.g. the bundled genome), else
+            # fall back to the shared last-used directory.
+            current = v.get()
+            start = (os.path.dirname(current)
+                     if current and current != PLACEHOLDER and os.path.isfile(current)
+                     else dialog_dir["path"])
+            chosen = filedialog.askopenfilename(initialdir=start)
             if chosen:
                 remember_dir(chosen)
                 v.set(chosen)

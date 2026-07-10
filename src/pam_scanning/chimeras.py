@@ -34,6 +34,39 @@ def default_codon_table_path():
 	return str(resources.files("pam_scanning") / "data" / "codon_tables" / "yeast_64_1_1_all_nuclear.cusp.txt")
 
 
+# The bundled default genome (S. cerevisiae BY4741) ships gzipped to keep the
+# package small; it is decompressed once into a user cache on first use.
+DEFAULT_GENOME_NAME = "BY4741_Toronto_2012.fsa"
+
+
+def default_genome_path():
+	"""Return a path to the bundled yeast genome FASTA, decompressing it if needed.
+
+	The genome is stored gzipped as package data and expanded once into
+	``~/.pam_scanning/genome`` (reused on later runs). Returns the path to the
+	decompressed FASTA, ready for the off-target BLAST genome parser.
+	"""
+	import gzip
+	import os
+	import shutil
+	from importlib import resources
+
+	cache_dir = os.path.join(os.path.expanduser("~"), ".pam_scanning", "genome")
+	cache_path = os.path.join(cache_dir, DEFAULT_GENOME_NAME)
+	source = resources.files("pam_scanning") / "data" / "genomes" / (DEFAULT_GENOME_NAME + ".gz")
+
+	# Reuse the cache only if it matches the packaged file's size (guards against a
+	# truncated earlier expansion or a package update).
+	with resources.as_file(source) as gz_path:
+		if not os.path.exists(cache_path) or os.path.getsize(cache_path) == 0:
+			os.makedirs(cache_dir, exist_ok=True)
+			tmp = cache_path + ".tmp"
+			with gzip.open(gz_path, "rb") as fin, open(tmp, "wb") as fout:
+				shutil.copyfileobj(fin, fout)
+			os.replace(tmp, cache_path)
+	return cache_path
+
+
 def parse_sequence_text(text, label="sequence"):
 	"""Parse typed or pasted sequence text into a bare uppercase DNA string.
 

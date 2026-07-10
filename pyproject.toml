@@ -44,4 +44,4 @@ package-dir = { "" = "src" }
 where = ["src"]
 
 [tool.setuptools.package-data]
-pam_scanning = ["data/codon_tables/*.txt"]
+pam_scanning = ["data/codon_tables/*.txt", "data/genomes/*.gz"]

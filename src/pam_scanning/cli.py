@@ -129,7 +129,8 @@ def _build_parser():
     p.add_argument("--genome", dest="local_genome_file_path",
                    help="Yeast host genome FASTA for off-target checks. PAM scanning is always "
                         "run in yeast (the ORF is ported in), so this is always a yeast genome; "
-                        "use it to choose the yeast species/strain/variant.")
+                        "use it to choose the yeast species/strain/variant. Defaults to the "
+                        "bundled BY4741 genome when omitted.")
     p.add_argument("--codon-table", dest="codon_table_file_path",
                    help="Codon-usage table. Defaults to the bundled yeast table.")
     p.add_argument("--codon-selection", dest="codon_selection_file_path",
@@ -450,6 +451,11 @@ def main(argv=None):
     if args.manifest and args.orf_dir:
         sys.exit("Error: use either --manifest or --orf-dir, not both.")
     _check_blast(install=args.install_blast)
+
+    # Default the off-target genome to the bundled yeast genome when none is given.
+    if not _is_set(base.get("local_genome_file_path")):
+        from pam_scanning.chimeras import default_genome_path
+        base["local_genome_file_path"] = default_genome_path()
 
     from pam_scanning.chimeras import pamscan
 
