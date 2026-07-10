@@ -113,7 +113,7 @@ In global mode each flank can be loaded **From file** or typed in with **Enter s
 | ORF FASTA (`--orf`) | The coding sequence, ATG → stop. |
 | 5′ flank (`--flank5` / `--flank5-seq`) | The 100 bp immediately upstream of the ATG (the `-` side), so positions at the start of the ORF can be scanned. Give a FASTA file or a literal sequence. |
 | 3′ flank (`--flank3` / `--flank3-seq`) | The 100 bp immediately downstream of the stop (the `+` side), so positions at the end of the ORF can be scanned. Give a FASTA file or a literal sequence. |
-| Genome FASTA (`--genome`) | Host genome used for off-target evaluation (also the source for your BLAST DB). |
+| Genome FASTA (`--genome`) | The **yeast** host genome for off-target evaluation (also the source for your BLAST DB). PAM scanning is always run in yeast — the ORF is ported in from its source organism — so this is always a yeast genome; use it to pick the yeast species/strain/variant. |
 | Codon table | Codon-usage table; the bundled yeast table is used if omitted. |
 | Codon selection (optional) | `.xlsx` listing specific residues to target. |
 

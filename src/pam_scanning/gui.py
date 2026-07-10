@@ -13,12 +13,17 @@ Launch with ``pam-scan-gui``.
 import json
 import os
 import threading
+import time
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox, font as tkfont
 from pathlib import Path
 
+from pam_scanning import fetch_cds
 from pam_scanning.chimeras import parse_sequence_text
 from pam_scanning.cli import blast_db_prefix, discover_orf_folder
+
+# FASTA extensions the folder loader inspects (matches cli.discover_orf_folder).
+_FASTA_EXTS = (".fa", ".fasta", ".fna", ".fas")
 
 # Where the last-used dialog directory is remembered between sessions.
 _STATE_PATH = Path.home() / ".pam_scanning" / "gui_state.json"
@@ -91,8 +96,9 @@ SEQUENCE_TIP = (
 # Shared file inputs (apply to every ORF).
 SHARED_FILE_FIELDS = [
     ("local_genome_file_path", "Genome sequence",
-     "The host genome sequence in FASTA format used for off-target evaluation. For a yeast "
-     "PAM scan, this is the full yeast genome."),
+     "The yeast host genome (FASTA) used for off-target evaluation. PAM scanning is always "
+     "performed in yeast -- the ORF is ported in from its source organism -- so this is always "
+     "a yeast genome; use it to select the yeast species, strain, or variant."),
     ("codon_table_file_path", "Codon table (optional)",
      "Codon-usage table for the host genome. Leave unset to use the bundled yeast table "
      "(yeast_64_1_1_all_nuclear.cusp.txt)."),
@@ -544,22 +550,8 @@ def main():
     ttk.Button(orf_buttons, text="+  Add ORF", style="Browse.TButton", command=add_orf).pack(
         side="left", padx=(0, 8))
 
-    def load_folder():
-        folder = filedialog.askdirectory(initialdir=dialog_dir["path"])
-        if not folder:
-            return
-        remember_dir(folder)
-        try:
-            orfs, skipped = discover_orf_folder(folder)
-        except OSError as exc:
-            messagebox.showerror("Folder error", str(exc))
-            return
-        if not orfs:
-            messagebox.showwarning(
-                "No ORFs found",
-                "No ORF files (named '<gene>_coding.fa', '<gene>_orf.fa', …) were found in:\n%s"
-                % folder)
-            return
+    def populate_orfs(orfs):
+        """Replace the queued ORF cards with the discovered ORFs."""
         for entry in list(orf_entries):
             entry["card"].destroy()
         orf_entries.clear()
@@ -571,6 +563,92 @@ def main():
                 if orf.get(key):
                     entry[key].set(orf[key])
         renumber_orfs()
+
+    def protein_fastas_in(folder):
+        """Return (name, path, accession) for each FASTA in *folder* that is protein."""
+        found = []
+        for name in sorted(os.listdir(folder)):
+            if os.path.splitext(name)[1].lower() not in _FASTA_EXTS:
+                continue
+            path = os.path.join(folder, name)
+            try:
+                if fetch_cds.fasta_is_protein(path):
+                    found.append((name, path, fetch_cds.accession_from_fasta(path)))
+            except OSError:
+                continue
+        return found
+
+    def fetch_cds_then_load(folder, proteins):
+        """Fetch a CDS from UniProt for each protein file, then re-discover the folder."""
+        status_var.set("Fetching %d coding sequence(s) from UniProt…" % len(proteins))
+        folder_btn.config(state="disabled")
+
+        def worker():
+            written, failed = [], []
+            for i, (name, _path, accession) in enumerate(proteins):
+                if not accession:
+                    failed.append("%s (no UniProt accession in header)" % name)
+                    continue
+                try:
+                    result = fetch_cds.fetch_cds_for_accession(accession)
+                    fetch_cds.write_coding_fasta(folder, result)
+                    written.append(result.gene)
+                except Exception as exc:   # per-file: report and keep going
+                    failed.append("%s (%s)" % (name, exc))
+                if i < len(proteins) - 1:
+                    time.sleep(0.34)       # respect NCBI's rate limit
+            root.after(0, lambda: finish_fetch(folder, written, failed))
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def finish_fetch(folder, written, failed):
+        folder_btn.config(state="normal")
+        try:
+            orfs, _skipped = discover_orf_folder(folder)
+        except OSError as exc:
+            messagebox.showerror("Folder error", str(exc))
+            return
+        populate_orfs(orfs)
+        msg = "Fetched %d coding sequence(s); loaded %d ORF(s)." % (len(written), len(orfs))
+        if failed:
+            msg += "\nCould not fetch: %s" % "; ".join(failed)
+        status_var.set(msg)
+        messagebox.showinfo("UniProt fetch complete", msg)
+
+    def load_folder():
+        folder = filedialog.askdirectory(initialdir=dialog_dir["path"])
+        if not folder:
+            return
+        remember_dir(folder)
+        try:
+            orfs, skipped = discover_orf_folder(folder)
+        except OSError as exc:
+            messagebox.showerror("Folder error", str(exc))
+            return
+
+        # Any protein FASTAs present can't be scanned; offer to fetch their CDS.
+        proteins = protein_fastas_in(folder)
+        if proteins and not orfs:
+            names = ", ".join(name for name, _, _ in proteins)
+            if messagebox.askyesno(
+                    "Protein sequences found",
+                    "%d file(s) here are protein sequences, not DNA:\n%s\n\n"
+                    "PAM-scanning needs the coding DNA (ATG..stop). Fetch each gene's CDS "
+                    "from UniProt (via its RefSeq cross-reference) and use those instead?\n\n"
+                    "Requires an internet connection." % (len(proteins), names)):
+                fetch_cds_then_load(folder, proteins)
+                return
+
+        if not orfs:
+            extra = ""
+            if proteins:
+                extra = ("\n\n(%d protein FASTA(s) were found but not fetched.)" % len(proteins))
+            messagebox.showwarning(
+                "No ORFs found",
+                "No ORF (DNA) files were found in:\n%s%s" % (folder, extra))
+            return
+
+        populate_orfs(orfs)
         msg = "Loaded %d ORF(s) from folder." % len(orfs)
         if skipped:
             msg += "  Ignored %d unrecognized file(s): %s" % (len(skipped), ", ".join(skipped))

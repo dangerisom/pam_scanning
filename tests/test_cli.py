@@ -166,6 +166,28 @@ def test_discover_folder_groups_by_gene_and_role(tmp_path):
     assert kss1["flank3_file_path"].endswith("KSS1_downstream.fa")
 
 
+def test_discover_folder_trims_refseq_accession_to_symbol(tmp_path):
+    _touch(tmp_path / "ABCB1_NM_001348945.2_ORF.fasta")
+    _touch(tmp_path / "ACTB_NM_001101.5_ORF.fasta")
+    orfs, skipped = cli.discover_orf_folder(str(tmp_path))
+    assert skipped == []
+    assert [o["geneName"] for o in orfs] == ["ABCB1", "ACTB"]
+
+
+def test_discover_folder_keeps_symbol_last_names(tmp_path):
+    # No RefSeq token: the '<strain>_<systematic>_<symbol>' name is left intact.
+    _touch(tmp_path / "S288C_YBL016W_FUS3_coding.fa")
+    orfs, _skipped = cli.discover_orf_folder(str(tmp_path))
+    assert [o["geneName"] for o in orfs] == ["S288C_YBL016W_FUS3"]
+
+
+def test_gene_symbol_strips_only_refseq_accessions():
+    assert cli._gene_symbol("ABCB1_NM_001348945.2") == "ABCB1"
+    assert cli._gene_symbol("AKT1_XM_017001.1") == "AKT1"
+    assert cli._gene_symbol("FUS3") == "FUS3"                 # nothing to strip
+    assert cli._gene_symbol("S288C_YBL016W_FUS3") == "S288C_YBL016W_FUS3"
+
+
 def test_discover_folder_global_flank_layout(tmp_path):
     """Only ORF files present: flanks are expected to come from a global flag."""
     _touch(tmp_path / "GeneA_coding.fa")

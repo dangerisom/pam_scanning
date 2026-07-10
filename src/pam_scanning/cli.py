@@ -127,7 +127,9 @@ def _build_parser():
                    help="3' flank as a literal sequence instead of a FASTA file. Mutually "
                         "exclusive with --flank3.")
     p.add_argument("--genome", dest="local_genome_file_path",
-                   help="Host genome FASTA used for off-target checks.")
+                   help="Yeast host genome FASTA for off-target checks. PAM scanning is always "
+                        "run in yeast (the ORF is ported in), so this is always a yeast genome; "
+                        "use it to choose the yeast species/strain/variant.")
     p.add_argument("--codon-table", dest="codon_table_file_path",
                    help="Codon-usage table. Defaults to the bundled yeast table.")
     p.add_argument("--codon-selection", dest="codon_selection_file_path",
@@ -244,6 +246,17 @@ _ROLE_SUFFIXES = (
     ("orf_file_path", ("_coding", "_orf", "_cds")),
 )
 
+# A trailing RefSeq nucleotide/protein accession in a derived gene name (e.g.
+# 'ABCB1_NM_001348945.2' from 'ABCB1_NM_001348945.2_ORF.fasta'). Stripped so the
+# gene name is just the symbol. Names without such a token are left unchanged, so
+# the '<strain>_<systematic>_<symbol>' convention is unaffected.
+_REFSEQ_ACCESSION = re.compile(r"_(?:NM|XM|NR|XR|NP|XP)_\d+(?:\.\d+)?$", re.IGNORECASE)
+
+
+def _gene_symbol(name):
+    """Trim a trailing RefSeq accession from a derived gene name."""
+    return _REFSEQ_ACCESSION.sub("", name)
+
 
 def discover_orf_folder(path):
     """Discover ORFs in a flat folder by filename convention (deterministic).
@@ -255,9 +268,10 @@ def discover_orf_folder(path):
     * 3' flank:      ``_flank3`` / ``_3flank`` / ``_downstream``(FASTA)
     * codon select.: ``_codonSelection`` / ``_codons``          (.xlsx)
 
-    The gene name is the filename stem with the role suffix removed. Files are
-    grouped into one ORF per gene. Per-ORF flanks found in the folder are kept;
-    when absent, the caller can supply a global 5'/3' flank instead.
+    The gene name is the filename stem with the role suffix removed, and a
+    trailing RefSeq accession trimmed (so 'ABCB1_NM_001348945.2_ORF.fasta' yields
+    'ABCB1'). Files are grouped into one ORF per gene. Per-ORF flanks found in the
+    folder are kept; when absent, the caller can supply a global 5'/3' flank instead.
 
     Returns ``(orfs, skipped)`` where *orfs* is a list of per-ORF kwarg dicts
     ordered by gene name, and *skipped* is a list of FASTA/.xlsx file names whose
@@ -279,7 +293,7 @@ def discover_orf_folder(path):
             match = next((s for s in suffixes if low.endswith(s)), None)
             if match is not None:
                 role = key
-                gene = stem[: len(stem) - len(match)]
+                gene = _gene_symbol(stem[: len(stem) - len(match)])
                 break
         if role is None:
             skipped.append(name)

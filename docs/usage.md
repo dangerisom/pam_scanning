@@ -14,7 +14,7 @@ All three share the same parameters and produce the same output.
 | `--flank3` | `flank3_file_path` | *(one flank per side required)* | FASTA of the 100 bp immediately **downstream** of the stop (the `+` side). Lets the scan reach positions at the end of the ORF. |
 | `--flank3-seq` | `flank3_sequence` | *(one flank per side required)* | The 3′ flank as a literal sequence instead of a FASTA file. Mutually exclusive with `--flank3`. |
 | `--manifest` | *(n/a)* | *(none)* | TSV of ORFs (one row each) for batch runs; see [Multiple ORFs](#multiple-orfs). |
-| `--genome` | `local_genome_file_path` | *(required)* | Host genome FASTA for off-target checks. |
+| `--genome` | `local_genome_file_path` | *(required)* | The **yeast** host genome FASTA for off-target checks. PAM scanning is always performed in yeast (the ORF is ported in from its source organism), so this is always a yeast genome; supply a specific yeast species/strain/variant. |
 | `--blast-db` | `localBlastDb` | `yeast` | Local BLAST+ database. A bare name (e.g. `yeast`) is resolved via `$BLASTDB`; a path prefix or a path to any member file (e.g. `/data/yeast.nin`) is accepted and reduced to the prefix. In the GUI this is a **Browse** button — pick any database file and the prefix path is used. |
 | `--gene-name` | `geneName` | *(required, per ORF)* | Label used in output filenames. |
 | `--codon-table` | `codon_table_file_path` | bundled yeast table | Codon-usage table (`.cusp`-style). |
@@ -124,7 +124,9 @@ sequence box shows a live base count (and reads *invalid* on a non-DNA character
 
 PAM-scanning needs the **coding DNA** (ATG→stop), but UniProt distributes
 **protein** FASTA. The `pam-scan-fetch-cds` helper bridges the two so a folder of
-UniProt downloads becomes a folder of PAM-scannable ORFs:
+UniProt downloads becomes a folder of PAM-scannable ORFs. The source organism only
+supplies the ORF — the scan itself is always performed in yeast, so `--genome`
+(off-target evaluation) remains a yeast genome regardless of where the gene came from.
 
 ```bash
 # From a folder of UniProt protein FASTAs (accession read from each header):
@@ -148,6 +150,10 @@ The stop codon is retained. Each file's header records provenance
 frame, unmatched isoform) is reported per accession rather than silently written.
 `--email` is passed to NCBI as a courtesy and is recommended for large batches;
 `--delay` (default 0.34 s) keeps within NCBI's rate limit.
+
+In the **GUI**, this is automatic: if **Load folder…** finds protein sequences
+instead of DNA, it offers to fetch their CDS from UniProt (the same routine) and
+loads the results — so a folder of UniProt downloads can be used directly.
 
 > The helper writes `‹gene›_coding.fa` alongside (or into `-o`); the original
 > protein FASTAs, having no role suffix, are simply ignored by folder discovery.

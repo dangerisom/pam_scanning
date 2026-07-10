@@ -33,6 +33,30 @@ def test_accession_from_fasta_reads_first_header(tmp_path):
     assert fc.accession_from_fasta(str(f)) == "P60709"
 
 
+# --- DNA vs protein detection ----------------------------------------------
+
+def test_is_dna_sequence():
+    assert fc.is_dna_sequence("ATGACGTNNN")
+    assert fc.is_dna_sequence("atgacg")          # case-insensitive
+    assert not fc.is_dna_sequence("")            # empty is not DNA
+    assert not fc.is_dna_sequence("MDDDIAALVV")  # protein
+
+
+def test_first_fasta_sequence_reads_one_record(tmp_path):
+    f = tmp_path / "x.fasta"
+    f.write_text(">a\nATG\nAAA\n>b\nGGG\n")
+    assert fc.first_fasta_sequence(str(f)) == "ATGAAA"
+
+
+def test_fasta_is_protein_distinguishes_dna_and_protein(tmp_path):
+    dna = tmp_path / "gene_coding.fa"
+    dna.write_text(">g\nATGAAATAG\n")
+    protein = tmp_path / "gene.fasta"
+    protein.write_text(">sp|P1|G_HUMAN x\nMDDDIAALVV\n")
+    assert fc.fasta_is_protein(str(protein)) is True
+    assert fc.fasta_is_protein(str(dna)) is False
+
+
 # --- RefSeq selection from a UniProt entry ---------------------------------
 
 def _uniprot_entry(gene, refseqs):

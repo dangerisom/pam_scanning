@@ -82,6 +82,31 @@ def accession_from_fasta(path):
     return None
 
 
+def first_fasta_sequence(path):
+    """Return the first FASTA record's sequence (upper-case, whitespace stripped)."""
+    seq, seen = [], False
+    with open(path) as fh:
+        for line in fh:
+            if line.startswith(">"):
+                if seen:
+                    break
+                seen = True
+            elif seen:
+                seq.append(line.strip())
+    return "".join(seq).upper()
+
+
+def is_dna_sequence(sequence):
+    """True if *sequence* is non-empty and contains only DNA bases (A/C/G/T/N)."""
+    return bool(sequence) and set(sequence.upper()) <= set("ACGTN")
+
+
+def fasta_is_protein(path):
+    """True if a FASTA file's first record is a sequence but not DNA (i.e. protein)."""
+    sequence = first_fasta_sequence(path)
+    return bool(sequence) and not is_dna_sequence(sequence)
+
+
 def select_refseq_mrna(uniprot_json):
     """From a UniProt entry JSON, return (gene_name, [refseq_mrna_ids]).
 
