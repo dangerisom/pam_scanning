@@ -694,7 +694,7 @@ def main():
     def _touchpad_dy(event):
         try:
             _dx, dy = (int(v) for v in root.tk.call("tk::PreciseScrollDeltas", event.delta))
-            return dy
+            return -dy   # reversed so the main window scrolls the way the trackpad expects
         except Exception:
             return 0
 
