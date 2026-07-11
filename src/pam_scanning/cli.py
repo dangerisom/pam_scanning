@@ -263,6 +263,26 @@ def _gene_symbol(name):
     return _REFSEQ_ACCESSION.sub("", name)
 
 
+# ORF filename suffixes, longest first, so '_coding'/'_orf'/'_cds' are stripped.
+_ORF_NAME_SUFFIXES = ("_coding", "_orf", "_cds")
+
+
+def gene_name_from_orf_path(path):
+    """Derive a gene name from an ORF FASTA filename (same rule as folder discovery).
+
+    Strips the extension, a trailing ORF role suffix (``_coding`` / ``_orf`` / ``_cds``),
+    and any trailing RefSeq accession, so ``AKT1_NM_001382431.1_ORF.fasta`` yields
+    ``AKT1`` and ``FUS3_coding.fa`` yields ``FUS3``.
+    """
+    stem = os.path.splitext(os.path.basename(path))[0]
+    low = stem.lower()
+    for suffix in _ORF_NAME_SUFFIXES:
+        if low.endswith(suffix):
+            stem = stem[: len(stem) - len(suffix)]
+            break
+    return _gene_symbol(stem)
+
+
 def discover_orf_folder(path):
     """Discover ORFs in a flat folder by filename convention (deterministic).
 

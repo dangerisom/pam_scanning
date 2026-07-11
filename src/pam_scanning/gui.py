@@ -22,7 +22,7 @@ from pathlib import Path
 
 from pam_scanning import fetch_cds
 from pam_scanning.chimeras import parse_sequence_text
-from pam_scanning.cli import blast_db_prefix, discover_orf_folder
+from pam_scanning.cli import blast_db_prefix, discover_orf_folder, gene_name_from_orf_path
 
 # FASTA extensions the folder loader inspects (matches cli.discover_orf_folder).
 _FASTA_EXTS = (".fa", ".fasta", ".fna", ".fas")
@@ -235,8 +235,8 @@ def main():
     root = tk.Tk()
     root.title("PAM Scanning")
     root.configure(bg=BG)
-    root.minsize(1180, 840)
-    root.geometry("1360x900")
+    root.minsize(1380, 860)
+    root.geometry("1580x920")
 
     # Fonts.
     base = tkfont.nametofont("TkDefaultFont")
@@ -698,7 +698,17 @@ def main():
         entry["orf_file_path"] = orf_var
         add_file_row(card, 2, "ORF", "Open the open reading frame (ORF) FASTA file for this "
                      "gene. The ORF should begin with the ATG start codon and end with a stop "
-                     "codon.", orf_var)
+                     "codon. If the gene name is left blank it is derived from this file name.",
+                     orf_var)
+
+        def _autofill_gene(*_, g=gene_var, o=orf_var):
+            # When an ORF file is chosen and no gene name is set, derive one from it.
+            if not g.get().strip():
+                path = o.get()
+                if path and path != PLACEHOLDER and os.path.isfile(path):
+                    g.set(gene_name_from_orf_path(path))
+
+        orf_var.trace_add("write", _autofill_gene)
 
         # Per-ORF flank rows (rows 3-4); shown/hidden by the flank mode.
         flank_widgets = []
@@ -984,9 +994,14 @@ def main():
         per_orf_mode = flank_mode.get() == "per_orf"
         orfs = []
         for entry in orf_entries:
+            orf_path = entry["orf_file_path"].get()
+            gene = entry["geneName"].get().strip()
+            # Blank gene name: derive it from the ORF file name.
+            if not gene and _is_set(orf_path) and os.path.isfile(orf_path):
+                gene = gene_name_from_orf_path(orf_path)
             orf = {
-                "geneName": entry["geneName"].get(),
-                "orf_file_path": entry["orf_file_path"].get(),
+                "geneName": gene,
+                "orf_file_path": orf_path,
                 "codon_selection_file_path": entry["codon_selection_file_path"].get(),
             }
             if per_orf_mode:
@@ -1020,7 +1035,9 @@ def main():
                     return False
         for i, orf in enumerate(orfs, start=1):
             if not orf["geneName"].strip():
-                messagebox.showerror("Missing input", "Please enter a gene name for ORF %d." % i)
+                messagebox.showerror("Missing input",
+                                     "ORF %d: enter a gene name, or select an ORF file to "
+                                     "derive one from." % i)
                 return False
             if not _is_set(orf["orf_file_path"]):
                 messagebox.showerror("Missing input",
@@ -1116,8 +1133,9 @@ def main():
 
     run_button.config(command=run_scan)
 
-    # Bias the initial split toward the form; the sash stays user-draggable.
-    root.after(60, lambda: paned.sashpos(0, 840))
+    # Bias the initial split toward the form; the sash stays user-draggable. The
+    # wider window gives the progress console (and its embedded plot) more room.
+    root.after(60, lambda: paned.sashpos(0, 860))
 
     root.mainloop()
 

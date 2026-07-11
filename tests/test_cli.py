@@ -220,6 +220,15 @@ def test_bundled_orf_folder_example_loads():
     assert os.path.isfile(o["codon_selection_file_path"])
 
 
+def test_gene_name_from_orf_path():
+    assert cli.gene_name_from_orf_path("/x/FUS3_coding.fa") == "FUS3"
+    assert cli.gene_name_from_orf_path("/x/KSS1_orf.fna") == "KSS1"
+    assert cli.gene_name_from_orf_path("/x/AKT1_NM_001382431.1_ORF.fasta") == "AKT1"
+    # No recognized suffix / a strain-systematic-symbol name is left intact.
+    assert cli.gene_name_from_orf_path("/x/S288C_YBL016W_FUS3_coding.fa") == "S288C_YBL016W_FUS3"
+    assert cli.gene_name_from_orf_path("/x/plainname.fasta") == "plainname"
+
+
 def test_manifest_and_orf_dir_are_mutually_exclusive():
     with pytest.raises(SystemExit):
         cli.main(["--manifest", "m.tsv", "--orf-dir", "d", "--genome", "g.fsa"])
