@@ -47,24 +47,30 @@ ACGT...           # entire chromosome 1 on one line
 ACGT...
 ```
 
-For *S. cerevisiae* BY4741 we use `BY4741_Toronto_2012.fsa`. The genome file is **not**
-shipped with this repository — download it from your preferred source (e.g.
-[SGD](https://www.yeastgenome.org/)) and keep it somewhere stable; you pass its path with
-`--genome`.
+For *S. cerevisiae* BY4741, `BY4741_Toronto_2012.fsa` is **bundled with the package** and
+used by default — you don't need to supply a genome at all for a standard yeast scan. To
+scan against a different yeast species/strain/variant, pass your own genome FASTA with
+`--genome` (or **Browse Genome sequence** in the GUI).
 
-## 3. Build the local BLAST database
+## 3. The BLAST database is built for you
+
+You normally **do not build a database yourself**. The first time a genome is used, PAM-scanning
+runs `makeblastdb` on it automatically, caches the result in `~/.pam_scanning/blastdb` (keyed to
+that genome), and reuses it on later runs. This keeps the database in lock-step with the genome
+being scanned, so there is nothing to set up: pick a genome (or accept the bundled default) and run.
+
+**Optional override.** If you already have a prebuilt database (e.g. a large shared one), point
+PAM-scanning at it and it will skip the auto-build:
 
 ```bash
-makeblastdb -in /path/to/BY4741_Toronto_2012.fsa -dbtype nucl -out yeast
+makeblastdb -in /path/to/genome.fsa -dbtype nucl -out /data/yeast   # if building your own
+pam-scan ... --blast-db /data/yeast
 ```
 
-This produces a set of `yeast.*` index files. The name you give `-out` (here `yeast`) is
-exactly what you pass to PAM-scanning as `--blast-db` (CLI). Keep the database files
-together; point `--blast-db` at the full path prefix (e.g. `/data/yeast`), pass a path to
-any one member file (e.g. `/data/yeast.nin` — the prefix is taken automatically), or use a
-bare name and run from the directory that contains the files (or set `$BLASTDB`). In the
-GUI, the **Browse  Local BLAST database** button lets you pick any database file and uses
-its prefix path.
+`--blast-db` accepts a path prefix (e.g. `/data/yeast`), a path to any one member file
+(e.g. `/data/yeast.nin` — the prefix is taken automatically), or a bare name resolved via
+`$BLASTDB`. In the GUI, **Browse database…** selects an existing database and **Use genome
+(auto)** returns to the automatic behavior.
 
 ## 4. Run
 

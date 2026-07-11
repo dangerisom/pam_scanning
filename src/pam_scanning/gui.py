@@ -310,7 +310,8 @@ def main():
     global_flank_path_vars = {key: tk.StringVar(value=PLACEHOLDER) for key, _, _, _ in GLOBAL_FLANK_FIELDS}
     global_flank_seq_vars = {key: tk.StringVar(value="") for key, _, _, _ in GLOBAL_FLANK_FIELDS}
     global_flank_widgets = {}                    # key -> {"file": [...], "sequence": [...]}
-    blast_db_var = tk.StringVar(value="yeast")   # BLAST -db prefix (name or browsed path)
+    AUTO_DB = "Auto — built from the genome on first use"
+    blast_db_var = tk.StringVar(value=AUTO_DB)   # AUTO_DB => build from the genome; else -db override
     string_vars = {key: tk.StringVar(value=default) for key, _, default, _ in STRING_FIELDS}
     int_vars = {key: tk.StringVar(value=str(default)) for key, _, default, _ in INT_FIELDS}
     output_var = tk.StringVar(value=os.getcwd())
@@ -870,20 +871,24 @@ def main():
     def browse_blast_db():
         chosen = filedialog.askopenfilename(
             initialdir=dialog_dir["path"],
-            title="Select any file of your BLAST database (e.g. yeast.nin)")
+            title="Select any file of an existing BLAST database (e.g. yeast.nin)")
         if chosen:
             remember_dir(chosen)
             blast_db_var.set(blast_db_prefix(chosen))
 
-    db_btn = ttk.Button(card, text="Browse  Local BLAST database", style="Browse.TButton",
-                       command=browse_blast_db, width=26)
-    db_btn.grid(row=db_row, column=1, sticky="e", padx=(6, 14), pady=10)
+    db_btns = ttk.Frame(card, style="Card.TFrame")
+    db_btns.grid(row=db_row, column=1, sticky="e", padx=(6, 14), pady=10)
+    ttk.Button(db_btns, text="Use genome (auto)", style="Small.TButton",
+               command=lambda: blast_db_var.set(AUTO_DB)).pack(side="left", padx=(0, 6))
+    db_btn = ttk.Button(db_btns, text="Browse database…", style="Browse.TButton",
+                        command=browse_blast_db, width=20)
+    db_btn.pack(side="left")
     attach_tip(db_lbl,
-               "Your local BLAST+ database. Browse to any file of the database (e.g. "
-               "yeast.nin / yeast.nsq); the shared prefix path is used as 'blastn -db'. "
-               "Defaults to the name 'yeast', resolved via your $BLASTDB. Build a database "
-               "with 'makeblastdb' (install BLAST+ from "
-               "https://ftp.ncbi.nlm.nih.gov/blast/executables/blast+/LATEST/).", db_btn)
+               "The BLAST+ database for off-target checks. By default it is built once from the "
+               "genome above (cached in ~/.pam_scanning/blastdb) and reused, so you don't need to "
+               "build one yourself. Optionally Browse to an existing prebuilt database (any member "
+               "file, e.g. yeast.nin) to use that instead; 'Use genome (auto)' returns to the default.",
+               db_btn)
 
     # --- Sequence & primer settings -------------------------------------
     card = section("Sequence & primer settings", 1)
@@ -927,7 +932,9 @@ def main():
     def collect_shared():
         shared = {key: var.get() for key, var in shared_file_vars.items()}
         shared.update({key: var.get() for key, var in string_vars.items()})
-        shared["localBlastDb"] = blast_db_prefix(blast_db_var.get())
+        db_text = blast_db_var.get()
+        # AUTO_DB (the default) => empty, so pamscan builds/caches a db from the genome.
+        shared["localBlastDb"] = "" if db_text == AUTO_DB else blast_db_prefix(db_text)
         if flank_mode.get() == "global":
             # Send exactly one kwarg per flank, so pamscan never sees file+sequence.
             for key, _label, short, _tip in GLOBAL_FLANK_FIELDS:

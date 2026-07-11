@@ -85,3 +85,42 @@ def test_install_blast_returns_existing_without_downloading(monkeypatch):
     # _platform_tag / network must never be reached.
     monkeypatch.setattr(bs, "_platform_tag", lambda: (_ for _ in ()).throw(AssertionError))
     assert bs.install_blast(log=lambda *_: None) == "/usr/local/bin/blastn"
+
+
+# --- Building a BLAST database from a genome --------------------------------
+
+def test_blast_db_exists(tmp_path):
+    prefix = str(tmp_path / "yeast")
+    assert not bs.blast_db_exists(prefix)
+    open(prefix + ".nin", "w").close()
+    assert bs.blast_db_exists(prefix)
+
+
+def test_genome_key_is_stable_and_size_sensitive(tmp_path):
+    g = tmp_path / "genome.fa"
+    g.write_text(">chr1\nACGT\n")
+    key = bs._genome_key(str(g))
+    assert key == bs._genome_key(str(g))          # same file -> same key
+    g.write_text(">chr1\nACGTACGT\n")             # content/size changed
+    assert bs._genome_key(str(g)) != key          # -> rebuild
+
+
+def test_ensure_blast_db_reuses_cached_without_rebuilding(tmp_path, monkeypatch):
+    g = tmp_path / "genome.fa"
+    g.write_text(">chr1\nACGT\n")
+    monkeypatch.setattr(bs, "app_blastdb_dir", lambda: str(tmp_path / "blastdb"))
+    monkeypatch.setattr(bs, "blast_db_exists", lambda prefix: True)   # pretend it's built
+    monkeypatch.setattr(bs, "ensure_available", lambda: (_ for _ in ()).throw(AssertionError))
+    prefix = bs.ensure_blast_db(str(g), log=lambda *_: None)
+    assert prefix.endswith("genome")             # <cache>/<genome-basename>
+
+
+def test_ensure_blast_db_errors_without_makeblastdb(tmp_path, monkeypatch):
+    g = tmp_path / "genome.fa"
+    g.write_text(">chr1\nACGT\n")
+    monkeypatch.setattr(bs, "app_blastdb_dir", lambda: str(tmp_path / "blastdb"))
+    monkeypatch.setattr(bs, "blast_db_exists", lambda prefix: False)
+    monkeypatch.setattr(bs, "ensure_available", lambda: None)
+    monkeypatch.setattr(bs.shutil, "which", lambda name: None)        # no makeblastdb
+    with pytest.raises(RuntimeError, match="makeblastdb"):
+        bs.ensure_blast_db(str(g), log=lambda *_: None)

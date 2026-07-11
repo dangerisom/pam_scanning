@@ -22,6 +22,7 @@ import hashlib
 import os
 import platform
 import shutil
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -205,6 +206,62 @@ def install_blast(log=print):
         raise RuntimeError("BLAST+ was downloaded but 'blastn' could not be located afterward.")
     log("\nBLAST+ ready: %s\n" % path)
     return path
+
+
+# --- Building a BLAST database from a genome FASTA ---------------------------
+
+def app_blastdb_dir():
+    """Root directory for app-managed BLAST databases built from genome FASTAs."""
+    return os.path.join(os.path.expanduser("~"), ".pam_scanning", "blastdb")
+
+
+def blast_db_exists(prefix):
+    """True if a nucleotide BLAST database exists at *prefix* (single- or multi-volume)."""
+    return any(os.path.exists(prefix + ext) for ext in (".nin", ".nal"))
+
+
+def _genome_key(genome_path):
+    """Stable cache key for a genome file (rebuilds if the file's size/mtime change)."""
+    st = os.stat(genome_path)
+    stamp = "%s|%d|%d" % (os.path.abspath(genome_path), st.st_size, int(st.st_mtime))
+    return hashlib.md5(stamp.encode("utf-8")).hexdigest()[:16]
+
+
+def ensure_blast_db(genome_path, log=print):
+    """Return a BLAST nucleotide database prefix for *genome_path*, building it if needed.
+
+    The database is built once with ``makeblastdb`` and cached under
+    ``~/.pam_scanning/blastdb`` keyed to the genome file, then reused on later
+    runs -- so selecting a genome is all a user needs, and the database always
+    matches the genome being scanned. Raises :class:`RuntimeError` if BLAST+ is
+    unavailable or the build fails.
+    """
+    genome_path = os.path.abspath(genome_path)
+    if not os.path.isfile(genome_path):
+        raise RuntimeError("Genome file not found: %s" % genome_path)
+
+    db_dir = os.path.join(app_blastdb_dir(), _genome_key(genome_path))
+    prefix = os.path.join(db_dir, os.path.splitext(os.path.basename(genome_path))[0])
+    if blast_db_exists(prefix):
+        return prefix
+
+    ensure_available()   # puts the BLAST+ bin (blastn + makeblastdb) on PATH
+    makeblastdb = shutil.which("makeblastdb")
+    if makeblastdb is None:
+        raise RuntimeError("'makeblastdb' (NCBI BLAST+) was not found; cannot build the "
+                           "BLAST database. Install BLAST+ (the GUI offers to, or --install-blast).")
+
+    os.makedirs(db_dir, exist_ok=True)
+    log("Building a BLAST database from %s (first use of this genome; cached afterward)...\n"
+        % os.path.basename(genome_path))
+    title = os.path.splitext(os.path.basename(genome_path))[0]
+    result = subprocess.run(
+        [makeblastdb, "-in", genome_path, "-dbtype", "nucl", "-out", prefix, "-title", title],
+        capture_output=True, text=True)
+    if result.returncode != 0 or not blast_db_exists(prefix):
+        raise RuntimeError("makeblastdb failed: %s" % (result.stderr.strip() or result.stdout.strip()))
+    log("BLAST database ready: %s\n" % prefix)
+    return prefix
 
 
 if __name__ == "__main__":   # convenience: `python -m pam_scanning.blast_setup`

@@ -72,7 +72,7 @@ def blast_db_prefix(value):
 # pam_scanning.chimeras.pamscan expects.
 DEFAULTS = {
     "geneName": None,
-    "localBlastDb": "yeast",
+    "localBlastDb": "",   # empty => auto-build a database from the genome (cached)
     "guidePrimerForwardSuffix": "GTTTTAGAGCTAGAAATAGCAAGTTAAAATAAG",
     "insertPrimerForwardSuffix": "GAAGATGTTGTCTGTTGCTCTATGTCATAT",
     "insertPrimerReverseSuffix": "CTTCTACAACAGACAACGAGATACAGTATA",
@@ -144,7 +144,8 @@ def _build_parser():
     # String parameters.
     p.add_argument("--gene-name", dest="geneName", help="Label used in output filenames. [single ORF]")
     p.add_argument("--blast-db", dest="localBlastDb",
-                   help="Name of the local BLAST+ database.")
+                   help="Optional prebuilt BLAST+ database (name or path). When omitted, a "
+                        "database is built once from --genome and cached in ~/.pam_scanning/blastdb.")
     p.add_argument("--guide-primer-forward-suffix", dest="guidePrimerForwardSuffix")
     p.add_argument("--insert-primer-forward-suffix", dest="insertPrimerForwardSuffix")
     p.add_argument("--insert-primer-reverse-suffix", dest="insertPrimerReverseSuffix")

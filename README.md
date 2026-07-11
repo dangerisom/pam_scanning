@@ -73,15 +73,18 @@ pam-scan \
     --orf examples/fasta/S288C_YBL016W_FUS3_coding.fa \
     --flank5 examples/fasta/S288C_YBL016W_FUS3_flank5.fa \
     --flank3 examples/fasta/S288C_YBL016W_FUS3_flank3.fa \
-    --genome /path/to/BY4741_Toronto_2012.fsa \
-    --blast-db yeast \
     --gene-name Fus3 \
     --output ./results
 ```
 
+No `--genome` or `--blast-db` is needed for a standard yeast scan: the bundled *S. cerevisiae*
+BY4741 genome is used by default, and its BLAST database is built once (with `makeblastdb`) and
+cached automatically. To scan against a different yeast species/strain/variant, pass your own
+`--genome`; give `--blast-db` only to reuse a prebuilt database.
+
 To scan **multiple ORFs** in one run, either list them in a tab-separated manifest
 (`--manifest examples/manifest.tsv`) or point at a folder of conventionally-named FASTA
-files (`--orf-dir examples/orf_folder`), with the shared `--genome`/`--blast-db` flags.
+files (`--orf-dir examples/orf_folder`), sharing the same genome.
 Flanks can be given per ORF or shared globally via a single `--flank5`/`--flank3` pair;
 see [`docs/usage.md`](docs/usage.md#multiple-orfs).
 

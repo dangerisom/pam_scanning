@@ -184,6 +184,13 @@ def pamscan(**kwargs):
 	if not codon_table_file_path or codon_table_file_path == 'No file selected':
 		codon_table_file_path = default_codon_table_path()
 
+	# No BLAST database supplied: build one (once, cached) from the genome itself, so
+	# the genome is the single input and the database always matches what is scanned.
+	# An explicit database name/path, when given, overrides this.
+	if not _is_provided(localBlastDb):
+		from pam_scanning import blast_setup
+		localBlastDb = blast_setup.ensure_blast_db(local_genome_file_path)
+
 	########################################################################################
 	# Primer-order layout settings...
 	########################################################################################

@@ -30,7 +30,7 @@ def test_single_orf_flags_build_kwargs():
     assert base["geneName"] == "Fus3"
     # Untouched defaults survive.
     assert base["primerLength"] == 100
-    assert base["localBlastDb"] == "yeast"
+    assert base["localBlastDb"] == ""   # empty => auto-build a db from the genome
 
 
 def test_validate_requires_both_flanks():
