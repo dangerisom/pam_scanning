@@ -109,10 +109,10 @@ cross-reference, choosing the isoform that matches the canonical protein) and wr
 
 All parameters can also be supplied via `--config run.toml` (or `run.json`); explicit
 flags override config values. Run `pam-scan --help` for the full list. The yeast codon
-table is bundled and used by default; supply `--codon-table` to override it, and
-`--codon-selection` to restrict insertion to specific residues. See
-[`docs/usage.md`](docs/usage.md) for the full parameter reference and a description of
-the output directory.
+table is bundled and used by default; supply `--codon-table` to override it. To restrict
+insertion to specific residues, give either `--codon-selection` (an `.xlsx`) or
+`--codon-positions "52, 89, 100-105"`. See [`docs/usage.md`](docs/usage.md) for the full
+parameter reference and a description of the output directory.
 
 ### Graphical interface
 
@@ -124,6 +124,10 @@ A Tkinter form that collects the same parameters and runs the identical pipeline
 Use **+ Add ORF** to queue ORFs one at a time, or **Load folder…** to discover a folder
 of them; the *Flank inputs* control switches between per-ORF and global 5′/3′ flanks.
 In global mode each flank can be loaded **From file** or typed in with **Enter sequence**.
+To target specific residues without preparing a spreadsheet, each ORF has a
+**Pick codons…** button that opens the gene's translated protein as a numbered,
+clickable grid — click residues (Shift/⌘-click to add more, or type positions) to
+choose the insertion codons graphically.
 
 ## Inputs
 
@@ -134,7 +138,7 @@ In global mode each flank can be loaded **From file** or typed in with **Enter s
 | 3′ flank (`--flank3` / `--flank3-seq`) | The 100 bp immediately downstream of the stop (the `+` side), so positions at the end of the ORF can be scanned. Give a FASTA file or a literal sequence. |
 | Genome FASTA (`--genome`) | The **yeast** host genome for off-target evaluation (also the source for your BLAST DB). PAM scanning is always run in yeast — the ORF is ported in from its source organism — so this is always a yeast genome. Defaults to the bundled BY4741 genome; override to pick a different yeast species/strain/variant. |
 | Codon table | Codon-usage table; the bundled yeast table is used if omitted. |
-| Codon selection (optional) | `.xlsx` listing specific residues to target. |
+| Codon selection (optional) | Specific residues to target, as an `.xlsx` (`--codon-selection`), a position list (`--codon-positions`), or the GUI **Pick codons…** picker. Omit to scan every codon (or every *N*th via the sampling gap). |
 
 For a batch of ORFs, a TSV manifest (`--manifest`) supplies the ORF, 5′/3′ flank, and
 optional codon-selection paths one row at a time; see [`docs/usage.md`](docs/usage.md#multiple-orfs).

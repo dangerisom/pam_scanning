@@ -43,3 +43,26 @@ def test_mark_silencers_lowercases_unchanged_bases():
     assert L.markSilencers("ATGC", "ATGC") == "atgc"
     # A single change is kept uppercase to flag the silencing mutation.
     assert L.markSilencers("ATTC", "ATGC") == "atTc"
+
+
+# --- codon-position parsing (shared by CLI --codon-positions and the GUI picker) ---
+
+from pam_scanning.chimeras import parse_codon_positions as _pcp
+
+
+def test_parse_codon_positions_singletons_and_ranges():
+    assert _pcp("52, 89, 100-105") == [52, 89, 100, 101, 102, 103, 104, 105]
+
+
+def test_parse_codon_positions_dedupes_and_sorts():
+    assert _pcp("3 3 1  2-4") == [1, 2, 3, 4]
+
+
+def test_parse_codon_positions_clamps_to_length():
+    assert _pcp("0, 5, 300", n=10) == [5]
+
+
+def test_parse_codon_positions_ignores_junk_and_empty():
+    assert _pcp("") == []
+    assert _pcp(None) == []
+    assert _pcp("1-2-3, 7, abc") == [7]   # malformed range dropped, valid kept

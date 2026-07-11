@@ -45,7 +45,7 @@ import re
 import shutil
 import sys
 
-from pam_scanning.chimeras import parse_sequence_text
+from pam_scanning.chimeras import parse_sequence_text, parse_codon_positions
 
 
 # A BLAST database is a set of files sharing a prefix; 'blastn -db' takes that
@@ -135,6 +135,10 @@ def _build_parser():
                    help="Codon-usage table. Defaults to the bundled yeast table.")
     p.add_argument("--codon-selection", dest="codon_selection_file_path",
                    help="Optional .xlsx of specific insertion sites (overrides sampling). [single ORF]")
+    p.add_argument("--codon-positions", dest="codon_selection_positions",
+                   type=parse_codon_positions,
+                   help="Specific insertion codons as positions/ranges, e.g. '52, 89, 100-105' "
+                        "(overrides sampling; adds to --codon-selection if both are given).")
     p.add_argument("-o", "--output", dest="outputPath", default=".",
                    help="Directory to write the time-stamped results into.")
     p.add_argument("--install-blast", dest="install_blast", action="store_true",

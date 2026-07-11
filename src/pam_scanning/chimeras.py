@@ -67,6 +67,32 @@ def default_genome_path():
 	return cache_path
 
 
+def parse_codon_positions(text, n=None):
+	"""Parse a codon/residue-position spec like ``"52, 89, 100-105"`` into a list.
+
+	Accepts individual positions and inclusive ranges separated by commas or
+	whitespace. Positions are 1-based; when *n* is given the result is restricted
+	to ``1..n`` (anything outside is dropped). Returns a sorted list of unique ints.
+	Shared by the CLI ``--codon-positions`` flag and the GUI codon picker so both
+	interpret a typed selection identically.
+	"""
+	positions = set()
+	for token in re.split(r"[,\s]+", str(text or "").strip()):
+		if not token:
+			continue
+		if "-" in token[1:]:  # an inclusive range like 100-105 (not a leading minus)
+			start, _, stop = token.partition("-")
+			if start.isdigit() and stop.isdigit():
+				positions.update(range(int(start), int(stop) + 1))
+		elif token.isdigit():
+			positions.add(int(token))
+	if n is not None:
+		positions = {p for p in positions if 1 <= p <= n}
+	else:
+		positions = {p for p in positions if p >= 1}
+	return sorted(positions)
+
+
 def parse_sequence_text(text, label="sequence"):
 	"""Parse typed or pasted sequence text into a bare uppercase DNA string.
 
@@ -167,6 +193,9 @@ def pamscan(**kwargs):
 	local_genome_file_path = kwargs['local_genome_file_path']
 	codon_table_file_path = kwargs.get('codon_table_file_path', 'No file selected')
 	codon_selection_file_path = kwargs['codon_selection_file_path']
+	# Explicit 1-based residue positions, e.g. from the GUI "Pick codons..." helper
+	# or the CLI --codon-positions flag; an alternative/addition to the .xlsx file.
+	codon_selection_positions = kwargs.get('codon_selection_positions')
 
 	geneName = kwargs['geneName']
 	localBlastDb = kwargs['localBlastDb']
@@ -250,6 +279,15 @@ def pamscan(**kwargs):
 			mutatedResidue = cell.value
 			selectCodons.append((residueNumber, originalResidue, mutatedResidue))
 			r += 1
+	# Explicit residue positions (GUI picker / --codon-positions) add to any
+	# file-based selection. Only the residue number drives codon filtering, so the
+	# original/mutated-residue slots are left blank.
+	if codon_selection_positions:
+		chosen = {c[0] for c in selectCodons}
+		for residueNumber in codon_selection_positions:
+			if residueNumber not in chosen:
+				selectCodons.append((residueNumber, None, None))
+				chosen.add(residueNumber)
 	selectCodons.sort()
 
 	# if not selectCodons:

@@ -50,7 +50,8 @@ anchors every codon and cut-site coordinate that follows.
 
 Which codons are actually targeted is then narrowed:
 
-- a **codon-selection** `.xlsx` restricts insertion to specific residues, or
+- a **codon selection** restricts insertion to specific residues — as an `.xlsx`,
+  a `--codon-positions` list, or the GUI **Pick codons…** picker — or
 - a **codon-sampling gap** inserts at every *N*th codon (default 1 = exhaustive).
 
 ## Stage 1 — Find PAM sites and candidate guides

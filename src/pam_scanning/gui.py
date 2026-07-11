@@ -21,7 +21,7 @@ from tkinter import ttk, filedialog, messagebox, font as tkfont
 from pathlib import Path
 
 from pam_scanning import fetch_cds
-from pam_scanning.chimeras import parse_sequence_text
+from pam_scanning.chimeras import parse_sequence_text, parse_codon_positions
 from pam_scanning.cli import blast_db_prefix, discover_orf_folder, gene_name_from_orf_path
 
 # FASTA extensions the folder loader inspects (matches cli.discover_orf_folder).
@@ -225,6 +225,198 @@ class Tooltip:
         if self._tip is not None:
             self._tip.destroy()
             self._tip = None
+
+
+# Sequence-viewer colours (a dark "editor" panel, like the af3 residue picker).
+SEQ_BG = "#0f1b28"
+SEQ_FG = "#cdd9e5"
+SEQ_GUTTER = "#5a6b7a"
+SEQ_SELECTED = "#2f5d8a"
+
+
+class CodonPicker(tk.Toplevel):
+    """Modal helper to pick insertion codons graphically from the protein sequence.
+
+    Shows the ORF's translated protein as a numbered, clickable grid (the same
+    interaction as the af3 residue picker): single-click selects one residue,
+    Shift/Cmd/Ctrl-click toggles residues, and positions can also be typed as
+    ``"52, 89, 100-105"``. On **Use these codons** the sorted 1-based positions are
+    stored in :attr:`result`; **Cancel** leaves it ``None``. Codon number *n*
+    corresponds to residue *n* of the protein (codon 1 = the start Met).
+    """
+
+    def __init__(self, parent, protein, gene, initial=()):
+        super().__init__(parent)
+        self.protein = protein
+        self.selected = {p for p in initial if 1 <= p <= len(protein)}
+        self.result = None
+
+        self.title("Pick insertion codons — %s" % (gene or "ORF"))
+        self.configure(bg=BG)
+        self.transient(parent)
+        self.resizable(True, True)
+        self.minsize(640, 460)
+
+        fam = tkfont.nametofont("TkDefaultFont").actual("family")
+        avail = set(tkfont.families(self))
+        mono = next((f for f in ("Menlo", "Consolas", "DejaVu Sans Mono", "Courier New")
+                     if f in avail), tkfont.nametofont("TkFixedFont").actual("family"))
+        self._f_label = tkfont.Font(family=fam, size=11)
+        self._f_seq = tkfont.Font(family=mono, size=14)
+
+        header = ttk.Label(
+            self, style="Field.TLabel", background=BG,
+            text="%s — %d residues.  Click a codon to select it; Shift/⌘-click to add "
+                 "or remove more (or type positions below)." % (gene or "ORF", len(protein)))
+        header.pack(fill="x", padx=12, pady=(12, 6))
+
+        viewer = ttk.Frame(self, style="TFrame")
+        viewer.pack(fill="both", expand=True, padx=12)
+        self.view = tk.Text(viewer, wrap="none", font=self._f_seq, height=12,
+                            background=SEQ_BG, foreground=SEQ_FG, insertwidth=0,
+                            cursor="arrow", spacing1=2, spacing3=2, borderwidth=0,
+                            highlightthickness=0)
+        vbar = ttk.Scrollbar(viewer, orient="vertical", command=self.view.yview)
+        self.view.configure(yscrollcommand=vbar.set)
+        self.view.grid(row=0, column=0, sticky="nsew")
+        vbar.grid(row=0, column=1, sticky="ns")
+        viewer.rowconfigure(0, weight=1)
+        viewer.columnconfigure(0, weight=1)
+        # Read-only but clickable: swallow typing/paste, keep tag bindings live.
+        for evt in ("<Key>", "<<Paste>>", "<<Cut>>", "<<Clear>>"):
+            self.view.bind(evt, lambda e: "break")
+        self.view.tag_configure("gutter", foreground=SEQ_GUTTER)
+        self.view.tag_configure("selected", background=SEQ_SELECTED)
+        self.view.tag_bind("residue", "<Button-1>", self._on_click)
+        self.view.tag_bind("residue", "<Shift-Button-1>", self._on_toggle)
+        self.view.tag_bind("residue", "<Command-Button-1>", self._on_toggle)
+        self.view.tag_bind("residue", "<Control-Button-1>", self._on_toggle)
+        self.view.tag_bind("residue", "<Enter>",
+                           lambda e: self.view.configure(cursor="hand2"))
+        self.view.tag_bind("residue", "<Leave>",
+                           lambda e: self.view.configure(cursor="arrow"))
+
+        ctl = ttk.Frame(self, style="TFrame")
+        ctl.pack(fill="x", padx=12, pady=(6, 2))
+        self.sel_label = ttk.Label(ctl, style="Field.TLabel", background=BG,
+                                   foreground=HEADER_BG, text="Selected: none")
+        self.sel_label.pack(side="left")
+        ttk.Label(ctl, style="Field.TLabel", background=BG,
+                  text="   or type positions:").pack(side="left")
+        self.pos_entry = ttk.Entry(ctl, width=20)
+        self.pos_entry.pack(side="left", padx=4)
+        self.pos_entry.bind("<Return>", lambda e: self._add_typed())
+        ttk.Button(ctl, text="Add", style="Small.TButton", width=6,
+                   command=self._add_typed).pack(side="left")
+        ttk.Button(ctl, text="Select all", style="Small.TButton",
+                   command=self._select_all).pack(side="left", padx=4)
+        ttk.Button(ctl, text="Clear", style="Small.TButton", width=6,
+                   command=self._clear).pack(side="left")
+
+        actions = ttk.Frame(self, style="TFrame")
+        actions.pack(fill="x", padx=12, pady=(4, 12))
+        ttk.Button(actions, text="Use these codons", style="Browse.TButton",
+                   command=self._accept).pack(side="right")
+        ttk.Button(actions, text="Cancel", style="Small.TButton",
+                   command=self._cancel).pack(side="right", padx=8)
+
+        self._render()
+        self.bind("<Escape>", lambda e: self._cancel())
+        self.protocol("WM_DELETE_WINDOW", self._cancel)
+        self.update_idletasks()
+        self.grab_set()
+        self.pos_entry.focus_set()
+
+    # --- rendering -----------------------------------------------------------
+    def _render(self):
+        """Draw the protein as a position-ruled grid; each residue is its own tag."""
+        txt = self.view
+        txt.delete("1.0", "end")
+        seq, per_line, group = self.protein, 30, 10
+        for start in range(0, len(seq), per_line):
+            chunk = seq[start:start + per_line]
+            txt.insert("end", "%6d  " % (start + 1), ("gutter",))
+            for k, ch in enumerate(chunk):
+                pos = start + k + 1
+                tags = ("residue", "res_%d" % pos)
+                txt.insert("end", ch, tags)   # residue letter + trailing space share the
+                txt.insert("end", " ", tags)  # tag: a wider, easier click target per residue
+                if (k + 1) % group == 0 and (k + 1) < len(chunk):
+                    txt.insert("end", "  ", ("gutter",))
+            txt.insert("end", " %d\n" % (start + len(chunk)), ("gutter",))
+        self._refresh_highlight()
+        self._update_label()
+
+    def _residue_at(self, event):
+        idx = self.view.index("@%d,%d" % (event.x, event.y))
+        for probe in (idx, "%s-1c" % idx):
+            for t in self.view.tag_names(probe):
+                if t.startswith("res_"):
+                    return int(t[4:])
+        return None
+
+    def _on_click(self, event):
+        pos = self._residue_at(event)
+        if pos is not None:
+            self.selected = {pos}
+            self._refresh_highlight()
+            self._update_label()
+        return "break"
+
+    def _on_toggle(self, event):
+        pos = self._residue_at(event)
+        if pos is not None:
+            self.selected ^= {pos}
+            self._refresh_highlight()
+            self._update_label()
+        return "break"
+
+    def _refresh_highlight(self):
+        self.view.tag_remove("selected", "1.0", "end")
+        for pos in self.selected:
+            r = self.view.tag_ranges("res_%d" % pos)
+            if r:
+                self.view.tag_add("selected", r[0], r[1])
+
+    def _update_label(self):
+        if not self.selected:
+            self.sel_label.configure(text="Selected: none")
+            return
+        ps = sorted(self.selected)
+        shown = ", ".join(str(p) for p in ps[:14]) + (" …" if len(ps) > 14 else "")
+        self.sel_label.configure(text="Selected (%d): %s" % (len(ps), shown))
+
+    # --- controls ------------------------------------------------------------
+    def _add_typed(self):
+        added = parse_codon_positions(self.pos_entry.get(), len(self.protein))
+        if not added:
+            messagebox.showerror("No positions",
+                                 "Enter positions like '52, 89, 100-105'.", parent=self)
+            return
+        self.selected |= set(added)
+        self.pos_entry.delete(0, "end")
+        self._refresh_highlight()
+        self._update_label()
+
+    def _select_all(self):
+        self.selected = set(range(1, len(self.protein) + 1))
+        self._refresh_highlight()
+        self._update_label()
+
+    def _clear(self):
+        self.selected = set()
+        self._refresh_highlight()
+        self._update_label()
+
+    def _accept(self):
+        self.result = sorted(self.selected)
+        self.grab_release()
+        self.destroy()
+
+    def _cancel(self):
+        self.result = None
+        self.grab_release()
+        self.destroy()
 
 
 # ---------------------------------------------------------------------------
@@ -674,6 +866,43 @@ def main():
             else:
                 w.grid_remove()
 
+    def update_picked_label(entry):
+        positions = entry.get("codon_positions") or []
+        var = entry["_picked_var"]
+        if not positions:
+            var.set("No codons picked graphically")
+            return
+        shown = ", ".join(str(p) for p in positions[:14]) + (" …" if len(positions) > 14 else "")
+        var.set("%d codon(s) picked: %s" % (len(positions), shown))
+
+    def open_codon_picker(entry):
+        orf_path = entry["orf_file_path"].get()
+        if not _is_set(orf_path) or not os.path.isfile(orf_path):
+            messagebox.showerror(
+                "Choose an ORF first",
+                "Select this ORF's FASTA file before picking codons — the protein "
+                "sequence is translated from it.")
+            return
+        try:
+            from pam_scanning.chimeras import _read_fasta_sequence
+            dna = _read_fasta_sequence(orf_path)
+            protein = fetch_cds.translate(dna)
+        except Exception as exc:
+            messagebox.showerror("Could not read ORF", "Failed to read the ORF FASTA:\n%s" % exc)
+            return
+        if not protein:
+            messagebox.showerror(
+                "Empty protein",
+                "The ORF did not translate to any residues. Check that it is a coding "
+                "DNA sequence (ATG…stop).")
+            return
+        gene = entry["geneName"].get().strip() or gene_name_from_orf_path(orf_path)
+        picker = CodonPicker(root, protein, gene, entry.get("codon_positions") or [])
+        root.wait_window(picker)
+        if picker.result is not None:      # None = cancelled; [] = deliberately cleared
+            entry["codon_positions"] = picker.result
+            update_picked_label(entry)
+
     def add_orf():
         card = ttk.Frame(orf_container, style="Card.TFrame")
         card.pack(fill="x", pady=(0, 10))
@@ -723,6 +952,20 @@ def main():
         add_file_row(card, 5, "Codon selection (optional)", "Optional .xlsx file listing "
                      "specific chimera insertion points for THIS ORF; overrides the codon "
                      "sampling frequency below.", sel_var)
+
+        # Graphical alternative to the .xlsx: pick insertion codons from the protein.
+        entry["codon_positions"] = []
+        picked_var = tk.StringVar(value="No codons picked graphically")
+        entry["_picked_var"] = picked_var
+        picked_lbl = ttk.Label(card, textvariable=picked_var, style="Path.TLabel",
+                               wraplength=560, anchor="w", justify="left")
+        picked_lbl.grid(row=6, column=0, sticky="we", padx=(14, 6), pady=10)
+        pick_btn = ttk.Button(card, text="Pick codons…", style="Browse.TButton",
+                              width=26, command=lambda e=entry: open_codon_picker(e))
+        pick_btn.grid(row=6, column=1, sticky="e", padx=(6, 14), pady=10)
+        attach_tip(picked_lbl, "Pick specific insertion codons graphically from this ORF's "
+                   "protein sequence (translated from the ORF FASTA). An alternative to the "
+                   ".xlsx above; if both are set, the picked codons are added to it.", pick_btn)
 
         orf_entries.append(entry)
         renumber_orfs()
@@ -1004,6 +1247,9 @@ def main():
                 "orf_file_path": orf_path,
                 "codon_selection_file_path": entry["codon_selection_file_path"].get(),
             }
+            positions = entry.get("codon_positions") or []
+            if positions:
+                orf["codon_selection_positions"] = list(positions)
             if per_orf_mode:
                 orf["flank5_file_path"] = entry["flank5_file_path"].get()
                 orf["flank3_file_path"] = entry["flank3_file_path"].get()

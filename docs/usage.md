@@ -22,6 +22,7 @@ For *what* the tool computes (the algorithm behind these parameters), see
 | `--gene-name` | `geneName` | *(required, per ORF)* | Label used in output filenames. |
 | `--codon-table` | `codon_table_file_path` | bundled yeast table | Codon-usage table (`.cusp`-style). |
 | `--codon-selection` | `codon_selection_file_path` | *(none, per ORF)* | `.xlsx` of specific residues to target; overrides sampling. |
+| `--codon-positions` | `codon_selection_positions` | *(none)* | Specific insertion codons as a position/range list, e.g. `"52, 89, 100-105"` (1-based). Overrides sampling; adds to `--codon-selection` if both are given. In the GUI this is the **Pick codons…** picker. |
 | `--output` / `-o` | `outputPath` | `.` | Directory to write the time-stamped run into. |
 | `--guide-primer-forward-suffix` | `guidePrimerForwardSuffix` | `GTTTTAGAGCTAGAAATAGCAAGTTAAAATAAG` | Suffix that amplifies the CRISPR plasmid after the targeting sequence. |
 | `--insert-primer-forward-suffix` | `insertPrimerForwardSuffix` | `GAAGATGTTGTCTGTTGCTCTATGTCATAT` | 5′→3′ insertion-primer suffix (chimera payload, forward). |
@@ -52,6 +53,26 @@ codonsSamplingGap = 1
 ```bash
 pam-scan --config run.toml
 ```
+
+## Choosing which codons to target
+
+By default the chimera is inserted at **every** codon (or every *N*th, via
+`--codon-sampling-gap`). To restrict insertion to specific residues instead, use
+any one of:
+
+- **`--codon-positions "52, 89, 100-105"`** — a 1-based list of positions and
+  inclusive ranges. Codon *n* is residue *n* of the protein (codon 1 = the start Met).
+- **`--codon-selection sites.xlsx`** — a spreadsheet with a `Mutations` sheet whose
+  first column holds the residue numbers (columns 2–3 may name the original/target
+  residue but are not required for site selection).
+- **GUI → Pick codons…** — each ORF card has a button that opens the gene's
+  translated protein as a numbered, clickable grid. Single-click selects a codon,
+  Shift/⌘/Ctrl-click adds or removes codons, and a text box accepts the same
+  `"52, 89, 100-105"` syntax. The picked codons are shown on the card and passed to
+  the run; it is the graphical equivalent of `--codon-positions`.
+
+Any of these overrides the sampling gap. If both `--codon-positions` (or the picker)
+and `--codon-selection` are supplied, their residues are combined.
 
 ## Multiple ORFs
 

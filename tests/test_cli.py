@@ -283,3 +283,20 @@ def test_blast_db_prefix_leaves_names_and_unrelated_paths_alone():
 def test_build_kwargs_normalizes_blast_db_path():
     base, _ = cli.build_kwargs(["--blast-db", "/data/yeast.nin", "--orf", ORF])
     assert base["localBlastDb"] == "/data/yeast"
+
+
+def test_codon_positions_flag_parses_into_kwarg():
+    base, _ = cli.build_kwargs([
+        "--orf", ORF, "--flank5", FLANK5, "--flank3", FLANK3,
+        "--genome", "/tmp/genome.fsa", "--gene-name", "Fus3",
+        "--codon-positions", "10, 20-22",
+    ])
+    assert base["codon_selection_positions"] == [10, 20, 21, 22]
+
+
+def test_codon_positions_absent_by_default():
+    base, _ = cli.build_kwargs([
+        "--orf", ORF, "--flank5", FLANK5, "--flank3", FLANK3,
+        "--genome", "/tmp/genome.fsa", "--gene-name", "Fus3",
+    ])
+    assert "codon_selection_positions" not in base
