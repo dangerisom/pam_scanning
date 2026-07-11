@@ -126,8 +126,9 @@ of them; the *Flank inputs* control switches between per-ORF and global 5′/3�
 In global mode each flank can be loaded **From file** or typed in with **Enter sequence**.
 To target specific residues without preparing a spreadsheet, each ORF has a
 **Pick codons…** button that opens the gene's translated protein as a numbered,
-clickable grid — click residues (Shift/⌘-click to add more, or type positions) to
-choose the insertion codons graphically.
+clickable grid — click residues to add or remove them (or type positions/ranges).
+Every pick appears in a list below, grouped into runs, with a **Remove** button on
+each line so a selection can be pruned before running.
 
 ## Inputs
 

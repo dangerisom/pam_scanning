@@ -66,10 +66,12 @@ any one of:
   first column holds the residue numbers (columns 2–3 may name the original/target
   residue but are not required for site selection).
 - **GUI → Pick codons…** — each ORF card has a button that opens the gene's
-  translated protein as a numbered, clickable grid. Single-click selects a codon,
-  Shift/⌘/Ctrl-click adds or removes codons, and a text box accepts the same
-  `"52, 89, 100-105"` syntax. The picked codons are shown on the card and passed to
-  the run; it is the graphical equivalent of `--codon-positions`.
+  translated protein as a numbered, clickable grid. Clicking a residue adds or
+  removes it, and a text box accepts the same `"52, 89, 100-105"` syntax. Picked
+  codons appear in a list below the grid — contiguous runs are grouped onto one
+  line — each with its own **Remove** button, so a selection can be pruned before
+  running. The picked codons are shown on the ORF card and passed to the run; it is
+  the graphical equivalent of `--codon-positions`.
 
 Any of these overrides the sampling gap. If both `--codon-positions` (or the picker)
 and `--codon-selection` are supplied, their residues are combined.

@@ -266,8 +266,8 @@ class CodonPicker(tk.Toplevel):
 
         header = ttk.Label(
             self, style="Field.TLabel", background=BG,
-            text="%s — %d residues.  Click a codon to select it; Shift/⌘-click to add "
-                 "or remove more (or type positions below)." % (gene or "ORF", len(protein)))
+            text="%s — %d residues.  Click a codon to add or remove it (or type positions "
+                 "below). Picked codons are listed underneath." % (gene or "ORF", len(protein)))
         header.pack(fill="x", padx=12, pady=(12, 6))
 
         viewer = ttk.Frame(self, style="TFrame")
@@ -298,11 +298,8 @@ class CodonPicker(tk.Toplevel):
 
         ctl = ttk.Frame(self, style="TFrame")
         ctl.pack(fill="x", padx=12, pady=(6, 2))
-        self.sel_label = ttk.Label(ctl, style="Field.TLabel", background=BG,
-                                   foreground=HEADER_BG, text="Selected: none")
-        self.sel_label.pack(side="left")
         ttk.Label(ctl, style="Field.TLabel", background=BG,
-                  text="   or type positions:").pack(side="left")
+                  text="Type positions:").pack(side="left")
         self.pos_entry = ttk.Entry(ctl, width=20)
         self.pos_entry.pack(side="left", padx=4)
         self.pos_entry.bind("<Return>", lambda e: self._add_typed())
@@ -312,6 +309,34 @@ class CodonPicker(tk.Toplevel):
                    command=self._select_all).pack(side="left", padx=4)
         ttk.Button(ctl, text="Clear", style="Small.TButton", width=6,
                    command=self._clear).pack(side="left")
+
+        # Picked-codons list: one line per contiguous run, each individually removable.
+        list_head = ttk.Frame(self, style="TFrame")
+        list_head.pack(fill="x", padx=12, pady=(8, 0))
+        self.sel_label = ttk.Label(list_head, style="Field.TLabel", background=BG,
+                                   foreground=HEADER_BG, text="Picked codons: none")
+        self.sel_label.pack(side="left")
+
+        list_wrap = ttk.Frame(self, style="TFrame")
+        list_wrap.pack(fill="x", padx=12, pady=(2, 2))
+        self.list_canvas = tk.Canvas(list_wrap, height=140, background=CARD,
+                                     highlightthickness=1, highlightbackground="#c9d3de")
+        list_sb = ttk.Scrollbar(list_wrap, orient="vertical", command=self.list_canvas.yview)
+        self.list_canvas.configure(yscrollcommand=list_sb.set)
+        self.list_canvas.pack(side="left", fill="both", expand=True)
+        list_sb.pack(side="right", fill="y")
+        self.list_inner = ttk.Frame(self.list_canvas, style="Card.TFrame")
+        self._list_window = self.list_canvas.create_window((0, 0), window=self.list_inner, anchor="nw")
+        self.list_inner.bind(
+            "<Configure>",
+            lambda e: self.list_canvas.configure(scrollregion=self.list_canvas.bbox("all")))
+        self.list_canvas.bind(
+            "<Configure>",
+            lambda e: self.list_canvas.itemconfigure(self._list_window, width=e.width))
+        # Wheel/trackpad scrolling, bound per-widget (never bind_all — the main GUI
+        # relies on its own bind_all scroll handlers).
+        self._wheel_bind(self.list_canvas)
+        self._wheel_bind(self.list_inner)
 
         actions = ttk.Frame(self, style="TFrame")
         actions.pack(fill="x", padx=12, pady=(4, 12))
@@ -344,8 +369,7 @@ class CodonPicker(tk.Toplevel):
                 if (k + 1) % group == 0 and (k + 1) < len(chunk):
                     txt.insert("end", "  ", ("gutter",))
             txt.insert("end", " %d\n" % (start + len(chunk)), ("gutter",))
-        self._refresh_highlight()
-        self._update_label()
+        self._changed()
 
     def _residue_at(self, event):
         idx = self.view.index("@%d,%d" % (event.x, event.y))
@@ -356,20 +380,21 @@ class CodonPicker(tk.Toplevel):
         return None
 
     def _on_click(self, event):
-        pos = self._residue_at(event)
-        if pos is not None:
-            self.selected = {pos}
-            self._refresh_highlight()
-            self._update_label()
-        return "break"
-
-    def _on_toggle(self, event):
+        """Any click toggles a codon in/out; the picked list accumulates every choice."""
         pos = self._residue_at(event)
         if pos is not None:
             self.selected ^= {pos}
-            self._refresh_highlight()
-            self._update_label()
+            self._changed()
         return "break"
+
+    # Shift/Cmd/Ctrl-click behaves the same (toggle) as a plain click.
+    _on_toggle = _on_click
+
+    def _changed(self):
+        """Single point that re-syncs the grid highlight, the count, and the list."""
+        self._refresh_highlight()
+        self._update_label()
+        self._render_list()
 
     def _refresh_highlight(self):
         self.view.tag_remove("selected", "1.0", "end")
@@ -379,12 +404,76 @@ class CodonPicker(tk.Toplevel):
                 self.view.tag_add("selected", r[0], r[1])
 
     def _update_label(self):
-        if not self.selected:
-            self.sel_label.configure(text="Selected: none")
+        n = len(self.selected)
+        self.sel_label.configure(
+            text="Picked codons: none" if not n else "Picked codons (%d)" % n)
+
+    def _runs(self):
+        """Collapse the selected positions into sorted, contiguous (lo, hi) runs."""
+        runs = []
+        for p in sorted(self.selected):
+            if runs and p == runs[-1][1] + 1:
+                runs[-1][1] = p
+            else:
+                runs.append([p, p])
+        return [(lo, hi) for lo, hi in runs]
+
+    def _render_list(self):
+        """Rebuild the picked-codons list: one row per run, each with a Remove button."""
+        for w in self.list_inner.winfo_children():
+            w.destroy()
+        self.list_inner.columnconfigure(0, weight=1)
+        runs = self._runs()
+        if not runs:
+            empty = ttk.Label(self.list_inner, style="Field.TLabel", foreground=MUTED,
+                              text="No codons picked yet — click residues above or type positions.")
+            empty.grid(row=0, column=0, sticky="w", padx=8, pady=6)
+            self._wheel_bind(empty)
             return
-        ps = sorted(self.selected)
-        shown = ", ".join(str(p) for p in ps[:14]) + (" …" if len(ps) > 14 else "")
-        self.sel_label.configure(text="Selected (%d): %s" % (len(ps), shown))
+        for i, (lo, hi) in enumerate(runs):
+            if lo == hi:
+                text = "Codon %d  (%s%d)" % (lo, self.protein[lo - 1], lo)
+            else:
+                text = "Codons %d–%d  (%d codons)" % (lo, hi, hi - lo + 1)
+            lbl = ttk.Label(self.list_inner, text=text, style="Field.TLabel")
+            lbl.grid(row=i, column=0, sticky="w", padx=(8, 6), pady=1)
+            btn = ttk.Button(self.list_inner, text="Remove", style="Small.TButton", width=8,
+                             command=lambda a=lo, b=hi: self._remove_run(a, b))
+            btn.grid(row=i, column=1, sticky="e", padx=(6, 8), pady=1)
+            self._wheel_bind(lbl)
+
+    def _remove_run(self, lo, hi):
+        self.selected -= set(range(lo, hi + 1))
+        self._changed()
+
+    # --- scrolling (per-widget; see note where these are bound) ---------------
+    def _wheel_bind(self, widget):
+        widget.bind("<MouseWheel>", self._on_list_wheel)
+        widget.bind("<Button-4>", self._on_list_wheel)
+        widget.bind("<Button-5>", self._on_list_wheel)
+        try:
+            widget.bind("<TouchpadScroll>", self._on_list_touch)   # Tk >= 8.7 / 9
+        except tk.TclError:
+            pass
+
+    def _on_list_wheel(self, event):
+        if getattr(event, "num", None) == 4:
+            step = -1
+        elif getattr(event, "num", None) == 5:
+            step = 1
+        else:
+            step = -1 if getattr(event, "delta", 0) > 0 else 1
+        self.list_canvas.yview_scroll(step, "units")
+        return "break"
+
+    def _on_list_touch(self, event):
+        try:
+            _dx, dy = self.tk.call("tk::PreciseScrollDeltas", event.delta)
+            if dy:
+                self.list_canvas.yview_scroll(-int(dy), "units")
+        except tk.TclError:
+            pass
+        return "break"
 
     # --- controls ------------------------------------------------------------
     def _add_typed(self):
@@ -395,18 +484,15 @@ class CodonPicker(tk.Toplevel):
             return
         self.selected |= set(added)
         self.pos_entry.delete(0, "end")
-        self._refresh_highlight()
-        self._update_label()
+        self._changed()
 
     def _select_all(self):
         self.selected = set(range(1, len(self.protein) + 1))
-        self._refresh_highlight()
-        self._update_label()
+        self._changed()
 
     def _clear(self):
         self.selected = set()
-        self._refresh_highlight()
-        self._update_label()
+        self._changed()
 
     def _accept(self):
         self.result = sorted(self.selected)
