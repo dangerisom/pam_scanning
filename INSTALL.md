@@ -1,6 +1,7 @@
 # Installing PAM Scanning (easy, no coding)
 
-This guide is for lab members who just want to **run** PAM Scanning. You do not
+This guide is for lab members and other outside researchers who just want to
+**run** PAM Scanning. You do not
 need to know any programming. There are only two steps, and the second is a
 one-time setup that happens automatically.
 

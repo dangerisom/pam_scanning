@@ -10,9 +10,9 @@ core algorithm lives in `pam_scanning.library`.
 
 ## The goal
 
-"PAM scanning" designs, for **every codon of an ORF**, a CRISPR/Cas9 experiment
-that inserts a sequence (a chimera payload) at that codon. For each insertion site
-the tool must produce:
+"PAM scanning" designs, for the codons of an ORF — **every codon by default, or a
+chosen subset** — a CRISPR/Cas9 experiment that inserts a sequence (a chimera payload)
+at that codon. For each insertion site the tool must produce:
 
 1. a **guide RNA** that directs Cas9 to cut near the insertion codon,
 2. a **silenced** version of that guide's target so the edited allele can't be

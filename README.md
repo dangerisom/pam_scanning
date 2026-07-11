@@ -1,7 +1,8 @@
 # PAM-scanning
 
-Design CRISPR/Cas9 guide RNAs and chimera-insertion primers for **every codon of an
-ORF** ("PAM scanning"). Given an open reading frame and its genomic context, the tool:
+Design CRISPR/Cas9 guide RNAs and chimera-insertion primers **across an ORF** — every
+codon by default, or a chosen subset ("PAM scanning"). Given an open reading frame and
+its genomic context, the tool:
 
 1. finds all NGG/CCN PAM sites across the ORF and the guides that target them,
 2. **silences** each PAM site (or, failing that, the guide body) with synonymous
