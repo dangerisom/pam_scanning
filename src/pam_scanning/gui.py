@@ -84,6 +84,9 @@ ACCENT_ACTIVE = "#256628"
 TIP_BG = "#fffbe6"
 TIP_BORDER = "#c9b458"
 INVALID = "#b00020"     # sequence box holds non-DNA characters
+# Scrolling (Tk 9 delivers trackpad scroll as <TouchpadScroll>, decoded to pixel deltas).
+TOUCHPAD_SCALE = 1.4      # pixels scrolled per unit of trackpad delta
+MOUSE_WHEEL_PIXELS = 40   # pixels per mouse-wheel notch
 CONSOLE_BG = "#0f1b28"  # progress console background
 CONSOLE_FG = "#d7e0ea"  # progress console text
 CONSOLE_MUTED = "#7f93a8"
@@ -352,7 +355,7 @@ def main():
     paned.pack(fill="both", expand=True)
 
     form_pane = ttk.Frame(paned, style="TFrame")
-    canvas = tk.Canvas(form_pane, background=BG, highlightthickness=0)
+    canvas = tk.Canvas(form_pane, background=BG, highlightthickness=0, yscrollincrement=1)
     scrollbar = ttk.Scrollbar(form_pane, orient="vertical", command=canvas.yview)
     body = ttk.Frame(canvas, style="TFrame")
     body.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
@@ -363,29 +366,52 @@ def main():
     scrollbar.pack(side="right", fill="y")
     paned.add(form_pane, weight=3)
 
-    def _wheel_steps(event):
-        """Scroll direction/magnitude across platforms (trackpad, touch mouse, wheel).
+    # Scrolling. Tk 9 delivers trackpad two-finger scroll as <TouchpadScroll> (NOT
+    # <MouseWheel>); its precise deltas are decoded with tk::PreciseScrollDeltas. With
+    # yscrollincrement=1 a canvas "unit" is one pixel, so scrolling is smooth.
+    def _touchpad_dy(event):
+        try:
+            _dx, dy = (int(v) for v in root.tk.call("tk::PreciseScrollDeltas", event.delta))
+            return dy
+        except Exception:
+            return 0
 
-        Linux uses Button-4/5; Windows sends delta in multiples of 120; macOS sends
-        small integer deltas (~1-3) — dividing those by 120 rounds to 0, which is why
-        trackpad scrolling did nothing before.
-        """
+    def _wheel_direction(event):
+        """Mouse-wheel direction as -1 (up) / +1 (down) / 0, across platforms."""
         if event.num == 4:
             return -1
         if event.num == 5:
             return 1
-        if abs(event.delta) >= 120:            # Windows
-            return -1 * int(event.delta / 120)
-        return -1 * event.delta                # macOS trackpad / wheel
+        if not event.delta:
+            return 0
+        return 1 if event.delta < 0 else -1
+
+    def _scroll_pixels(widget, accum, key, pixels, what):
+        """Scroll *widget* by a possibly-fractional pixel amount, banking the remainder."""
+        accum[key] += pixels
+        steps = int(accum[key])
+        if steps:
+            accum[key] -= steps
+            widget.yview_scroll(steps, what)
+
+    form_accum = {"y": 0.0}
+
+    def _on_touchpad(event):
+        dy = _touchpad_dy(event)
+        if dy:
+            _scroll_pixels(canvas, form_accum, "y", dy * TOUCHPAD_SCALE, "units")
 
     def _on_mousewheel(event):
-        step = _wheel_steps(event)
-        if step:
-            canvas.yview_scroll(step, "units")
+        direction = _wheel_direction(event)
+        if direction:
+            canvas.yview_scroll(direction * MOUSE_WHEEL_PIXELS, "units")
 
-    canvas.bind_all("<MouseWheel>", _on_mousewheel)
-    canvas.bind_all("<Button-4>", _on_mousewheel)
-    canvas.bind_all("<Button-5>", _on_mousewheel)
+    try:
+        canvas.bind_all("<TouchpadScroll>", _on_touchpad)   # Tk >= 8.7 / 9
+    except tk.TclError:
+        pass   # older Tk: the trackpad arrives as <MouseWheel>, handled below
+    for _seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):
+        canvas.bind_all(_seq, _on_mousewheel)
 
     # --- Progress console (right pane) -----------------------------------
     console_pane = ttk.Frame(paned, style="Console.TFrame")
@@ -425,12 +451,24 @@ def main():
         console.configure(state="disabled")
 
     # Scroll the console over itself; return "break" so it doesn't also move the form.
-    def _console_wheel(event):
-        step = _wheel_steps(event)
-        if step:
-            console.yview_scroll(step, "units")
+    console_accum = {"y": 0.0}
+
+    def _console_touchpad(event):
+        dy = _touchpad_dy(event)
+        if dy:
+            _scroll_pixels(console, console_accum, "y", dy * TOUCHPAD_SCALE, "pixels")
         return "break"
 
+    def _console_wheel(event):
+        direction = _wheel_direction(event)
+        if direction:
+            console.yview_scroll(direction * MOUSE_WHEEL_PIXELS, "pixels")
+        return "break"
+
+    try:
+        console.bind("<TouchpadScroll>", _console_touchpad)   # Tk >= 8.7 / 9
+    except tk.TclError:
+        pass
     console.bind("<MouseWheel>", _console_wheel)
     console.bind("<Button-4>", _console_wheel)
     console.bind("<Button-5>", _console_wheel)
