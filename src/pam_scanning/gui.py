@@ -250,6 +250,11 @@ class CodonPicker(tk.Toplevel):
         self.protein = protein
         self.selected = {p for p in initial if 1 <= p <= len(protein)}
         self.result = None
+        # Drag-select state (a left-click-drag selects a contiguous run of codons).
+        self._drag_anchor = None
+        self._drag_base = set()
+        self._drag_last = None
+        self._dragged = False
 
         self.title("Pick insertion codons — %s" % (gene or "ORF"))
         self.configure(bg=BG)
@@ -266,8 +271,9 @@ class CodonPicker(tk.Toplevel):
 
         header = ttk.Label(
             self, style="Field.TLabel", background=BG,
-            text="%s — %d residues.  Click a codon to add or remove it (or type positions "
-                 "below). Picked codons are listed underneath." % (gene or "ORF", len(protein)))
+            text="%s — %d residues.  Click a codon to add or remove it, or drag to select a "
+                 "run (or type positions below). Picked codons are listed underneath."
+                 % (gene or "ORF", len(protein)))
         header.pack(fill="x", padx=12, pady=(12, 6))
 
         viewer = ttk.Frame(self, style="TFrame")
@@ -287,10 +293,13 @@ class CodonPicker(tk.Toplevel):
             self.view.bind(evt, lambda e: "break")
         self.view.tag_configure("gutter", foreground=SEQ_GUTTER)
         self.view.tag_configure("selected", background=SEQ_SELECTED)
-        self.view.tag_bind("residue", "<Button-1>", self._on_click)
-        self.view.tag_bind("residue", "<Shift-Button-1>", self._on_toggle)
-        self.view.tag_bind("residue", "<Command-Button-1>", self._on_toggle)
-        self.view.tag_bind("residue", "<Control-Button-1>", self._on_toggle)
+        # Press on a residue starts a click (toggle) or a drag (run select); the
+        # motion/release are handled at the widget level so a drag can sweep across
+        # the whole grid, not just the residue first pressed.
+        for evt in ("<Button-1>", "<Shift-Button-1>", "<Command-Button-1>", "<Control-Button-1>"):
+            self.view.tag_bind("residue", evt, self._on_press)
+        self.view.bind("<B1-Motion>", self._on_drag)
+        self.view.bind("<ButtonRelease-1>", self._on_release)
         self.view.tag_bind("residue", "<Enter>",
                            lambda e: self.view.configure(cursor="hand2"))
         self.view.tag_bind("residue", "<Leave>",
@@ -379,16 +388,43 @@ class CodonPicker(tk.Toplevel):
                     return int(t[4:])
         return None
 
-    def _on_click(self, event):
-        """Any click toggles a codon in/out; the picked list accumulates every choice."""
-        pos = self._residue_at(event)
-        if pos is not None:
-            self.selected ^= {pos}
-            self._changed()
+    def _on_press(self, event):
+        """Press on a residue: remember the anchor; a plain click toggles it (on
+        release), a drag from here selects the run it sweeps."""
+        self._drag_anchor = self._residue_at(event)
+        self._drag_base = set(self.selected)
+        self._drag_last = self._drag_anchor
+        self._dragged = False
         return "break"
 
-    # Shift/Cmd/Ctrl-click behaves the same (toggle) as a plain click.
-    _on_toggle = _on_click
+    def _on_drag(self, event):
+        """Left-click-drag: add every codon between the anchor and the pointer."""
+        if self._drag_anchor is None:
+            return "break"
+        pos = self._residue_at(event)
+        if pos is None:                 # over a gap/gutter: hold the last residue
+            pos = self._drag_last
+        if pos is None:
+            return "break"
+        self._drag_last = pos
+        if pos != self._drag_anchor:
+            self._dragged = True
+        lo, hi = sorted((self._drag_anchor, pos))
+        self.selected = self._drag_base | set(range(lo, hi + 1))
+        # Keep the sweep responsive: update the grid + count now, defer the (heavier)
+        # list rebuild to release.
+        self._refresh_highlight()
+        self._update_label()
+        return "break"
+
+    def _on_release(self, event):
+        if self._drag_anchor is None:
+            return "break"
+        if not self._dragged:           # no motion => a click that toggles one codon
+            self.selected = set(self._drag_base) ^ {self._drag_anchor}
+        self._drag_anchor = None
+        self._changed()
+        return "break"
 
     def _changed(self):
         """Single point that re-syncs the grid highlight, the count, and the list."""
@@ -817,8 +853,12 @@ def main():
         card.columnconfigure(weighted_col, weight=1)
         return card
 
-    def add_file_row(card, row, button_label, tip, var):
-        """Add a path-label + Browse-button row; return its widgets (for show/hide)."""
+    def add_file_row(card, row, button_label, tip, var, *, button_text=None, button_width=26):
+        """Add a path-label + Browse-button row; return its widgets (for show/hide).
+
+        By default the button reads "Browse  <button_label>"; pass *button_text* to
+        set the label verbatim (and *button_width* to size it).
+        """
         path_lbl = ttk.Label(card, textvariable=var, style="Path.TLabel",
                              wraplength=560, anchor="w", justify="left")
         path_lbl.grid(row=row, column=0, sticky="we", padx=(14, 6), pady=10)
@@ -835,8 +875,8 @@ def main():
                 remember_dir(chosen)
                 v.set(chosen)
 
-        btn = ttk.Button(card, text="Browse  " + button_label, style="Browse.TButton",
-                         command=browse, width=26)
+        btn = ttk.Button(card, text=button_text or ("Browse  " + button_label),
+                         style="Browse.TButton", command=browse, width=button_width)
         btn.grid(row=row, column=1, sticky="e", padx=(6, 14), pady=10)
         attach_tip(path_lbl, tip, btn)
         return [path_lbl, btn]
@@ -1035,9 +1075,10 @@ def main():
 
         sel_var = tk.StringVar(value=PLACEHOLDER)
         entry["codon_selection_file_path"] = sel_var
-        add_file_row(card, 5, "Codon selection (optional)", "Optional .xlsx file listing "
-                     "specific chimera insertion points for THIS ORF; overrides the codon "
-                     "sampling frequency below.", sel_var)
+        add_file_row(card, 5, "Codon selection (optional)", "Choose specific chimera insertion "
+                     "points for THIS ORF from an .xlsx file (residue numbers in column 1); "
+                     "overrides the codon sampling frequency below.", sel_var,
+                     button_text="Codon Selection: by File", button_width=32)
 
         # Graphical alternative to the .xlsx: pick insertion codons from the protein.
         entry["codon_positions"] = []
@@ -1046,8 +1087,9 @@ def main():
         picked_lbl = ttk.Label(card, textvariable=picked_var, style="Path.TLabel",
                                wraplength=560, anchor="w", justify="left")
         picked_lbl.grid(row=6, column=0, sticky="we", padx=(14, 6), pady=10)
-        pick_btn = ttk.Button(card, text="Pick codons…", style="Browse.TButton",
-                              width=26, command=lambda e=entry: open_codon_picker(e))
+        pick_btn = ttk.Button(card, text="Codon Selection: by Codon Picker",
+                              style="Browse.TButton", width=32,
+                              command=lambda e=entry: open_codon_picker(e))
         pick_btn.grid(row=6, column=1, sticky="e", padx=(6, 14), pady=10)
         attach_tip(picked_lbl, "Pick specific insertion codons graphically from this ORF's "
                    "protein sequence (translated from the ORF FASTA). An alternative to the "

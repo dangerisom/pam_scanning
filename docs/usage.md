@@ -65,13 +65,14 @@ any one of:
 - **`--codon-selection sites.xlsx`** — a spreadsheet with a `Mutations` sheet whose
   first column holds the residue numbers (columns 2–3 may name the original/target
   residue but are not required for site selection).
-- **GUI → Pick codons…** — each ORF card has a button that opens the gene's
-  translated protein as a numbered, clickable grid. Clicking a residue adds or
-  removes it, and a text box accepts the same `"52, 89, 100-105"` syntax. Picked
-  codons appear in a list below the grid — contiguous runs are grouped onto one
+- **GUI → Codon Selection: by Codon Picker** — each ORF card has a button that opens
+  the gene's translated protein as a numbered, clickable grid. Click a residue to add
+  or remove it, **drag to select a run**, or type the same `"52, 89, 100-105"` syntax.
+  Picked codons appear in a list below the grid — contiguous runs are grouped onto one
   line — each with its own **Remove** button, so a selection can be pruned before
   running. The picked codons are shown on the ORF card and passed to the run; it is
-  the graphical equivalent of `--codon-positions`.
+  the graphical equivalent of `--codon-positions`. (The **Codon Selection: by File**
+  button on the same card is the `.xlsx` route.)
 
 Any of these overrides the sampling gap. If both `--codon-positions` (or the picker)
 and `--codon-selection` are supplied, their residues are combined.

@@ -124,9 +124,10 @@ A Tkinter form that collects the same parameters and runs the identical pipeline
 Use **+ Add ORF** to queue ORFs one at a time, or **Load folder…** to discover a folder
 of them; the *Flank inputs* control switches between per-ORF and global 5′/3′ flanks.
 In global mode each flank can be loaded **From file** or typed in with **Enter sequence**.
-To target specific residues without preparing a spreadsheet, each ORF has a
-**Pick codons…** button that opens the gene's translated protein as a numbered,
-clickable grid — click residues to add or remove them (or type positions/ranges).
+Each ORF offers two ways to restrict insertion to specific residues:
+**Codon Selection: by File** (an `.xlsx`) and **Codon Selection: by Codon Picker**.
+The picker opens the gene's translated protein as a numbered, clickable grid — click
+a residue to add or remove it, **drag to select a run**, or type positions/ranges.
 Every pick appears in a list below, grouped into runs, with a **Remove** button on
 each line so a selection can be pruned before running.
 
