@@ -360,7 +360,7 @@ def _parse_blast_lines(lines, genome, pamInclusionSequenceThreshold, pamInclusio
 									# print()
 									# print(1, blastCheck)
 									# print(2, blastCheckExtended)
-									if blastCheckExtended[0] in "CT":
+									if blastCheckExtended and blastCheckExtended[0] in "CT":
 
 										# Conservative...
 										if len(matchingSequence) > pamInclusionSequenceThreshold:
@@ -380,7 +380,7 @@ def _parse_blast_lines(lines, genome, pamInclusionSequenceThreshold, pamInclusio
 									# print("reversed...")
 									# print(1, reverseComplement(blastCheck))
 									# print(2, blastCheckExtended)
-									if blastCheckExtended[-1] in "AG":
+									if blastCheckExtended and blastCheckExtended[-1] in "AG":
 
 										# Conservative...
 										if len(matchingSequence) > pamInclusionSequenceThreshold:
@@ -447,7 +447,7 @@ def _parse_blast_lines(lines, genome, pamInclusionSequenceThreshold, pamInclusio
 									# print()
 									# print(1, blastCheck)
 									# print(2, blastCheckExtended)
-									if blastCheckExtended[0] in "AG":
+									if blastCheckExtended and blastCheckExtended[0] in "AG":
 
 										# Conservative...
 										if len(matchingSequence) > pamInclusionSequenceThreshold:
@@ -468,7 +468,7 @@ def _parse_blast_lines(lines, genome, pamInclusionSequenceThreshold, pamInclusio
 									# print("reversed...2")
 									# print(1, reverseComplement(blastCheck))
 									# print(2, blastCheckExtended)
-									if blastCheckExtended[-1] in "CT":
+									if blastCheckExtended and blastCheckExtended[-1] in "CT":
 
 										# Conservative...
 										if len(matchingSequence) > pamInclusionSequenceThreshold:
@@ -539,7 +539,7 @@ def _parse_blast_lines(lines, genome, pamInclusionSequenceThreshold, pamInclusio
 									# print()
 									# print(1, blastCheck)
 									# print(2, blastCheckExtended)
-									if blastCheckExtended[0] in "CT":
+									if blastCheckExtended and blastCheckExtended[0] in "CT":
 
 										# Conservative...
 										if len(matchingSequence) > pamInclusionSequenceThreshold:
@@ -559,7 +559,7 @@ def _parse_blast_lines(lines, genome, pamInclusionSequenceThreshold, pamInclusio
 									# print("reversed...")
 									# print(1, reverseComplement(blastCheck))
 									# print(2, blastCheckExtended)
-									if blastCheckExtended[-1] in "AG":
+									if blastCheckExtended and blastCheckExtended[-1] in "AG":
 
 										# Conservative...
 										if len(matchingSequence) > pamInclusionSequenceThreshold:
@@ -621,7 +621,7 @@ def _parse_blast_lines(lines, genome, pamInclusionSequenceThreshold, pamInclusio
 									# print()
 									# print(1, blastCheck)
 									# print(2, blastCheckExtended)
-									if blastCheckExtended[0] in "AG":
+									if blastCheckExtended and blastCheckExtended[0] in "AG":
 
 										# Conservative...
 										if len(matchingSequence) > pamInclusionSequenceThreshold:
@@ -642,7 +642,7 @@ def _parse_blast_lines(lines, genome, pamInclusionSequenceThreshold, pamInclusio
 									# print("reversed...2")
 									# print(1, reverseComplement(blastCheck))
 									# print(2, blastCheckExtended)
-									if blastCheckExtended[-1] in "CT":
+									if blastCheckExtended and blastCheckExtended[-1] in "CT":
 
 										# Conservative...
 										if len(matchingSequence) > pamInclusionSequenceThreshold:
@@ -718,7 +718,9 @@ def _evaluate_blocks(blocks, genome, localGenomeFilePath, pamInclusionSequenceTh
 					print("BLAST+: evaluated guide %d of %d" % (k, total))
 			return results
 		except Exception as exc:   # never let a pool problem fail the run
+			import traceback
 			print("BLAST+: parallel evaluation unavailable (%s); using a single core." % exc)
+			print("BLAST+: (details) " + traceback.format_exc().replace("\n", "\n           "))
 	results = []
 	for k, block in enumerate(blocks, 1):
 		results.append(_parse_blast_lines(block, genome, pamInclusionSequenceThreshold, pamInclusionThreshold))
