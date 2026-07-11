@@ -654,16 +654,28 @@ def pamscan(**kwargs):
 	# Report the total PAM-scannable sequence of the ORF for reference...
 	########################################################################################
 
-	fraction_scannable, scannableSequence = calculateScannableSequence(
-		qcPath, geneName, orfSequence, orfPlusSequence, safeGuides, maxPamCutGap)
+	calculateScannableSequence(qcPath, geneName, orfSequence, orfPlusSequence, safeGuides, maxPamCutGap)
 
 	########################################################################################
-	# Summary report (shown in the console) + PAM-scannability plot (QC + console)...
+	# Summary report (console) + PAM-scannability grid (QC + console)...
 	########################################################################################
+
+	# Per-codon PAM cut gap of the optimal guide across the whole ORF (None = inaccessible).
+	# A smaller gap = Cas9 cut closer to the insertion point = higher editing efficiency.
+	nCodons = len(orfSequence) // 3
+	maxCodonGap = int(maxPamCutGap / 2)
+	codonGaps = [None] * nCodons
+	for codonKey, codonInfo in allCodons.items():
+		codonNumber = codonInfo[1]
+		entry = optiGuidesAllCodons.get(codonKey)
+		if 1 <= codonNumber <= nCodons:
+			codonGaps[codonNumber - 1] = entry[2] if entry else None
+	nAccessible = sum(1 for g in codonGaps if g is not None)
+	fractionScannable = nAccessible / nCodons if nCodons else 0.0
 
 	designedSites = sum(1 for k in optiGuides if optiGuides[k])
 	summary = _build_summary(
-		geneName, len(orfSequence) // 3, len(orfSequence), fraction_scannable,
+		geneName, nCodons, len(orfSequence), fractionScannable,
 		designedSites, len(codons), len(noOptiGuideCodonSet),
 		len(primerOrderGuides), len(primerOrderInserts), len(writeInclusions), outputPath)
 	print(summary)
@@ -673,13 +685,13 @@ def pamscan(**kwargs):
 	plot_png = None
 	try:
 		from pam_scanning.plots import plot_scannable_positions
-		plot_png = plot_scannable_positions(qcPath, geneName, scannableSequence, fraction_scannable)
+		plot_png = plot_scannable_positions(qcPath, geneName, codonGaps, maxCodonGap, fractionScannable)
 		if plot_png:
 			print("Scannability plot written: " + plot_png)
 	except Exception as exc:   # a plotting hiccup must never fail the scan
 		print("Note: could not render the scannability plot (%s)." % exc)
 
 	return {"geneName": geneName, "output_dir": outputPath, "qc_dir": qcPath,
-	        "plot_png": plot_png, "fraction_scannable": fraction_scannable, "summary": summary}
+	        "plot_png": plot_png, "fraction_scannable": fractionScannable, "summary": summary}
 
 

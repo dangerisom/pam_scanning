@@ -1,93 +1,106 @@
-"""Publication-quality plot of PAM-scannable positions along an ORF.
+"""Publication-quality grid of PAM-scannable positions along an ORF.
 
-Renders a compact horizontal track: every codon of the ORF is drawn, coloured by
-whether a chimera insertion at that position is reachable by a validated guide
-(PAM-scannable) or falls in a gap. Saved as vector PDF and 300-dpi PNG in the QC
-folder; the PNG is also shown in the GUI progress console.
+Every codon is a cell in a numbered grid (rows of ``cols`` residues). Inaccessible
+positions -- no validated guide reaches them -- are white. Accessible positions are
+coloured on a discrete spectrum by the PAM cut gap of their optimal guide (the
+distance between the Cas9 cut and the insertion point); a smaller gap means higher
+editing efficiency. Saved to the QC folder as vector PDF and 300-dpi PNG, and shown
+in the GUI progress console.
 
-matplotlib is imported lazily (with the non-interactive Agg backend) so importing
-this module -- or running the CLI without plotting -- stays light and thread-safe.
+matplotlib is imported lazily (non-interactive Agg backend) so importing this module
+-- or running the CLI without plotting -- stays light and thread-safe.
 """
 
 import os
 
-# Colour-blind-safe pairing on the blue-yellow axis (safe for red-green CVD):
-# teal = scannable (good), amber = gap (needs attention).
-_SCANNABLE = "#2c7fb8"
-_GAP = "#e8a33d"
 _TEXT = "#1f2a36"
 _MUTED = "#6b7a8d"
+_GRIDLINE = "#cfd6de"
 
 
-def codon_scannability(scannable_sequence):
-    """Return a per-codon list of booleans (True = PAM-scannable) from the masked ORF.
+def plot_scannable_positions(qc_path, gene_name, codon_gaps, max_gap, fraction,
+                             formats=("pdf", "png"), cols=25, step=5):
+    """Render the PAM-scannability grid for one ORF; return the saved PNG path (or None).
 
-    ``scannable_sequence`` is the ORF with unscannable positions blanked to spaces
-    (as produced by :func:`pam_scanning.library.calculateScannableSequence`). A
-    codon counts as scannable if any of its three nucleotides is unblanked.
+    ``codon_gaps`` is a per-codon list (residue = index + 1) holding the optimal
+    guide's PAM cut gap, or ``None`` where the codon is inaccessible. ``max_gap`` is
+    the largest possible gap (``maxPamCutGap / 2``), used to scale the colour bins.
+    Writes ``<gene>-scannableMap.<ext>`` into *qc_path* for each format.
     """
-    n = len(scannable_sequence) // 3
-    return [any(ch != " " for ch in scannable_sequence[3 * c:3 * c + 3]) for c in range(n)]
-
-
-def _runs(flags, value):
-    """Yield (start, length) for each maximal run of *value* in *flags* (0-based)."""
-    start = None
-    for i, f in enumerate(flags):
-        if f == value and start is None:
-            start = i
-        elif f != value and start is not None:
-            yield start, i - start
-            start = None
-    if start is not None:
-        yield start, len(flags) - start
-
-
-def plot_scannable_positions(qc_path, gene_name, scannable_sequence, fraction,
-                             formats=("pdf", "png")):
-    """Render the PAM-scannability track for one ORF; return the saved PNG path (or None).
-
-    Writes ``<gene>-scannableMap.<ext>`` into *qc_path* for each requested format.
-    """
+    import numpy as np
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
-    from matplotlib.patches import Patch
+    import matplotlib.cm as cm
+    import matplotlib.colors as mcolors
+    from matplotlib.patches import Patch, Rectangle
 
-    flags = codon_scannability(scannable_sequence)
-    n = len(flags)
+    n = len(codon_gaps)
     if n == 0:
         return None
-    n_scannable = sum(flags)
+    rows = -(-n // cols)                       # ceil division
+    n_accessible = sum(1 for g in codon_gaps if g is not None)
 
-    # A tall-enough figure with the track strip in the lower band, leaving a clear
-    # header band above for the title, subtitle and legend (fixed positions so they
-    # never overlap the bar regardless of ORF length).
-    fig = plt.figure(figsize=(10, 2.5))
-    ax = fig.add_axes((0.055, 0.34, 0.90, 0.24))   # [left, bottom, width, height]
+    # Grid of gap values; NaN (masked) = inaccessible or padding -> drawn white.
+    grid = np.full((rows, cols), np.nan)
+    for i, g in enumerate(codon_gaps):
+        if g is not None:
+            grid[divmod(i, cols)] = g
+    masked = np.ma.masked_invalid(grid)
 
-    # Full ORF as the "gap" baseline, scannable runs drawn over it. Bars are in
-    # 1-based residue coordinates: codon c (0-based) spans residues [c+0.5, c+1.5).
-    ax.broken_barh([(0.5, n)], (0, 1), facecolors=_GAP, edgecolor="none")
-    ax.broken_barh([(s + 0.5, w) for s, w in _runs(flags, True)], (0, 1),
-                   facecolors=_SCANNABLE, edgecolor="none")
+    # Discrete colour spectrum over the gap, in `step`-bp bins. A perceptually-uniform,
+    # colour-blind-safe map (viridis), sub-ranged to avoid the near-white top so a
+    # high-gap cell is never confused with a white (inaccessible) cell.
+    top = max(step, int(np.ceil(max_gap / step) * step))
+    boundaries = np.arange(0, top + step, step)
+    n_bins = len(boundaries) - 1
+    cmap = mcolors.ListedColormap(cm.viridis(np.linspace(0.08, 0.90, n_bins)))
+    cmap.set_bad("white")
+    norm = mcolors.BoundaryNorm(boundaries, cmap.N)
 
-    ax.set_xlim(0.5, n + 0.5)
-    ax.set_ylim(0, 1)
-    ax.set_yticks([])
-    ax.set_xlabel("Residue position", fontsize=11)
-    for side in ("left", "right", "top"):
-        ax.spines[side].set_visible(False)
-    ax.tick_params(axis="x", labelsize=10)
+    fig_w = min(13.5, cols * 0.34 + 3.4)
+    fig_h = min(15.0, rows * 0.34 + 1.9)
+    fig, ax = plt.subplots(figsize=(fig_w, fig_h))
+    fig.subplots_adjust(top=0.84, bottom=0.09, left=0.07, right=0.86)
 
-    fig.text(0.055, 0.90, "PAM-scannable positions — %s" % gene_name,
-             fontsize=13, fontweight="bold", color=_TEXT, va="top")
-    fig.text(0.055, 0.74, "%d of %d codons scannable  (%.1f%% of the ORF)"
-             % (n_scannable, n, 100.0 * fraction), fontsize=10.5, color=_MUTED, va="top")
-    fig.legend(handles=[Patch(facecolor=_SCANNABLE, label="Scannable"),
-                        Patch(facecolor=_GAP, label="Gap (unscannable)")],
-               loc="upper right", bbox_to_anchor=(0.955, 0.99), ncol=1, frameon=False,
-               fontsize=9.5, handlelength=1.2, labelspacing=0.4)
+    im = ax.imshow(masked, cmap=cmap, norm=norm, aspect="equal")
+
+    # Cell borders via minor gridlines (so white cells still read as grid cells).
+    ax.set_xticks(np.arange(-0.5, cols, 1), minor=True)
+    ax.set_yticks(np.arange(-0.5, rows, 1), minor=True)
+    ax.grid(which="minor", color=_GRIDLINE, linewidth=0.6)
+    ax.tick_params(which="minor", length=0)
+
+    # Blank the padding cells past the ORF end in the last row (no border) so they
+    # read as empty space, not as white "inaccessible" cells.
+    filled_last_row = n - (rows - 1) * cols
+    if filled_last_row < cols:
+        ax.add_patch(Rectangle((filled_last_row - 0.5, rows - 1 - 0.5),
+                               cols - filled_last_row, 1.0,
+                               facecolor="white", edgecolor="none", zorder=3))
+
+    ax.set_xticks(range(cols))
+    ax.set_xticklabels(range(1, cols + 1), fontsize=7)
+    ax.set_yticks(range(rows))
+    ax.set_yticklabels([r * cols + 1 for r in range(rows)], fontsize=8)
+    ax.set_xlabel("Position within row", fontsize=9)
+    ax.set_ylabel("Residue at row start", fontsize=9)
+    ax.tick_params(axis="both", which="major", length=0)
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+
+    fig.text(0.075, 0.955, "PAM-scannable positions — %s" % gene_name,
+             fontsize=14, fontweight="bold", color=_TEXT, va="top")
+    fig.text(0.075, 0.905, "%d of %d codons accessible  (%.1f%%)"
+             % (n_accessible, n, 100.0 * fraction), fontsize=10.5, color=_MUTED, va="top")
+
+    cbar = fig.colorbar(im, ax=ax, fraction=0.045, pad=0.02, ticks=boundaries)
+    cbar.set_label("PAM cut gap (bp)\nlower = higher editing efficiency", fontsize=8.5)
+    cbar.ax.tick_params(labelsize=7.5)
+    cbar.outline.set_visible(False)
+
+    fig.legend(handles=[Patch(facecolor="white", edgecolor=_GRIDLINE, label="Inaccessible")],
+               loc="upper right", bbox_to_anchor=(0.995, 0.985), frameon=False, fontsize=9)
 
     png_path = None
     for ext in formats:

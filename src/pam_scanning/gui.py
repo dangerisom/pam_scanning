@@ -1038,12 +1038,10 @@ def main():
     def finish(error, out_path, n):
         run_button.config(state="normal")
         if error is not None:
-            status_var.set("Error — see message.")
-            messagebox.showerror("PAM scan failed", str(error))
+            status_var.set("Error — see the progress console.")
+            console_error("\nError: %s\n" % error)   # no popup; surfaced in the console
         else:
             status_var.set("Done. %d ORF(s) written under: %s" % (n, out_path))
-            messagebox.showinfo("PAM scan complete",
-                                "Output for %d ORF(s) written under:\n%s" % (n, out_path))
 
     def start_scan_worker(shared, orfs):
         out_path = shared["outputPath"]
