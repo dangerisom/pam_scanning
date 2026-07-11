@@ -135,6 +135,25 @@ def _write_flank_qc(qcPath, geneName, label, path, sequence):
 	output.close()
 
 
+def _build_summary(gene, n_codons, n_bp, fraction, designed_sites, requested_sites,
+                   unscannable_sites, n_guide_primers, n_insert_primers, n_warnings, output_dir):
+	"""Compose the end-of-run summary shown in the progress console."""
+	rule = "=" * 64
+	rows = [
+		("ORF length", "%d codons (%d bp)" % (n_codons, n_bp)),
+		("PAM-scannable", "%.1f%% of the ORF" % (100.0 * fraction)),
+		("Insertion sites", "%d of %d requested codon(s) have a guide" % (designed_sites, requested_sites)),
+		("Unscannable sites", "%d" % unscannable_sites),
+		("Guide primers", "%d" % n_guide_primers),
+		("Insertion primers", "%d" % n_insert_primers),
+		("PAM-inclusion warnings", "%d" % n_warnings),
+		("Output", output_dir),
+	]
+	body = "\n".join("  %-24s %s" % (label + " " + "." * (22 - len(label)), value)
+	                 for label, value in rows)
+	return "\n%s\n  PAM-scan summary: %s\n%s\n%s\n%s" % (rule, gene, rule, body, rule)
+
+
 def pamscan(**kwargs):
 
 	# Set **kwargs
@@ -635,6 +654,32 @@ def pamscan(**kwargs):
 	# Report the total PAM-scannable sequence of the ORF for reference...
 	########################################################################################
 
-	calculateScannableSequence(qcPath, geneName, orfSequence, orfPlusSequence, safeGuides, maxPamCutGap)
+	fraction_scannable, scannableSequence = calculateScannableSequence(
+		qcPath, geneName, orfSequence, orfPlusSequence, safeGuides, maxPamCutGap)
+
+	########################################################################################
+	# Summary report (shown in the console) + PAM-scannability plot (QC + console)...
+	########################################################################################
+
+	designedSites = sum(1 for k in optiGuides if optiGuides[k])
+	summary = _build_summary(
+		geneName, len(orfSequence) // 3, len(orfSequence), fraction_scannable,
+		designedSites, len(codons), len(noOptiGuideCodonSet),
+		len(primerOrderGuides), len(primerOrderInserts), len(writeInclusions), outputPath)
+	print(summary)
+	with open(qcPath + geneName + "-summary.txt", "w") as summaryFile:
+		summaryFile.write(summary + "\n")
+
+	plot_png = None
+	try:
+		from pam_scanning.plots import plot_scannable_positions
+		plot_png = plot_scannable_positions(qcPath, geneName, scannableSequence, fraction_scannable)
+		if plot_png:
+			print("Scannability plot written: " + plot_png)
+	except Exception as exc:   # a plotting hiccup must never fail the scan
+		print("Note: could not render the scannability plot (%s)." % exc)
+
+	return {"geneName": geneName, "output_dir": outputPath, "qc_dir": qcPath,
+	        "plot_png": plot_png, "fraction_scannable": fraction_scannable, "summary": summary}
 
 

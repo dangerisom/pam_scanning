@@ -1420,6 +1420,9 @@ def calculateScannableSequence(outputPath, geneName, orfSequence, orfPlusSequenc
             for start_plus, gap, stop_plus, codon_list in unscannableCodons:
                 f.write(gap + " " + str(codon_list) + "\n")
 
+    # Return the data needed for the summary report and the scannability plot.
+    return fraction_scannable, scannableSequence
+
 def createPrimerOrder(path, microplateWells, geneName, guidePrimers, insertPrimers):
 
 	# Prepare guide primers...

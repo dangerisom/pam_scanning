@@ -14,6 +14,7 @@ channels:
 dependencies:
   - python >=3.9
   - openpyxl
+  - matplotlib-base     # PAM-scannability plot in the QC output / progress console
   - blast >=2.12        # NCBI BLAST+: provides blastn (and makeblastdb)
   - pip
   - pip:

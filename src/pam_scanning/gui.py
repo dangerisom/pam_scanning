@@ -445,6 +445,26 @@ def main():
     console.tag_configure("error", foreground="#ff9a8f")
     paned.add(console_pane, weight=2)
 
+    console_images = []   # keep PhotoImage refs so Tk doesn't garbage-collect them
+
+    def embed_plot(png_path):
+        """Insert a saved plot PNG into the console (main thread), scaled to the pane."""
+        try:
+            img = tk.PhotoImage(file=png_path)
+        except tk.TclError:
+            return   # e.g. Tk built without PNG support; the file is still saved to QC
+        pane_width = max(360, console.winfo_width() - 28)
+        factor = max(1, -(-img.width() // pane_width))   # ceil division
+        if factor > 1:
+            img = img.subsample(factor, factor)
+        console_images.append(img)
+        console.configure(state="normal")
+        console.insert("end", "\n")
+        console.image_create("end", image=img)
+        console.insert("end", "\n")
+        console.see("end")
+        console.configure(state="disabled")
+
     def _append_console(text, tag=None):
         console.configure(state="normal")
         console.insert("end", text, tag or ())
@@ -1039,7 +1059,9 @@ def main():
                         msg = "Running ORF %d/%d (%s)… see the progress console." % (
                             i, n, orf["geneName"])
                         root.after(0, lambda m=msg: status_var.set(m))
-                        pamscan(**dict(shared, **orf))
+                        result = pamscan(**dict(shared, **orf))
+                        if isinstance(result, dict) and result.get("plot_png"):
+                            root.after(0, lambda p=result["plot_png"]: embed_plot(p))
                 console_banner("\n===== Done: %d ORF(s) written =====\n" % n)
                 root.after(0, lambda: finish(None, out_path, n))
             except Exception as exc:  # surface any failure back on the UI thread
