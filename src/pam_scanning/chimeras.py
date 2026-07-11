@@ -711,6 +711,12 @@ def pamscan(**kwargs):
 	nAccessible = sum(1 for g in codonGaps if g is not None)
 	fractionScannable = nAccessible / nCodons if nCodons else 0.0
 
+	# When specific insertion codons were requested, the scannability plot reports
+	# only those (others greyed out). None => exhaustive/sampled run: report all.
+	selectedCodonNumbers = None
+	if selectCodons:
+		selectedCodonNumbers = {info[1] for info in codons.values()}
+
 	designedSites = sum(1 for k in optiGuides if optiGuides[k])
 	summary = _build_summary(
 		geneName, nCodons, len(orfSequence), fractionScannable,
@@ -723,7 +729,8 @@ def pamscan(**kwargs):
 	plot_png = None
 	try:
 		from pam_scanning.plots import plot_scannable_positions
-		plot_png = plot_scannable_positions(qcPath, geneName, codonGaps, maxCodonGap, fractionScannable)
+		plot_png = plot_scannable_positions(qcPath, geneName, codonGaps, maxCodonGap,
+		                                    fractionScannable, selected=selectedCodonNumbers)
 		if plot_png:
 			print("Scannability plot written: " + plot_png)
 	except Exception as exc:   # a plotting hiccup must never fail the scan

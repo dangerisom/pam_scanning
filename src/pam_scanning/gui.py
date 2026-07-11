@@ -494,11 +494,11 @@ class CodonPicker(tk.Toplevel):
 
     def _on_list_wheel(self, event):
         if getattr(event, "num", None) == 4:
-            step = -1
-        elif getattr(event, "num", None) == 5:
             step = 1
+        elif getattr(event, "num", None) == 5:
+            step = -1
         else:
-            step = -1 if getattr(event, "delta", 0) > 0 else 1
+            step = 1 if getattr(event, "delta", 0) > 0 else -1
         self.list_canvas.yview_scroll(step, "units")
         return "break"
 
@@ -506,7 +506,7 @@ class CodonPicker(tk.Toplevel):
         try:
             _dx, dy = self.tk.call("tk::PreciseScrollDeltas", event.delta)
             if dy:
-                self.list_canvas.yview_scroll(-int(dy), "units")
+                self.list_canvas.yview_scroll(int(dy), "units")
         except tk.TclError:
             pass
         return "break"

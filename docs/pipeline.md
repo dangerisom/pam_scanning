@@ -140,7 +140,9 @@ the driver writes:
   and silenced guides, primers),
 - **per-codon silenced-ORF FASTAs** (viewable in SnapGene),
 - the **scannable-sequence report** and a colour-blind-safe **scannability grid**
-  (one cell per codon, coloured by cut gap),
+  (one cell per codon, coloured by cut gap; when a specific codon set was requested,
+  only those codons are reported — unselected codons are greyed out, and a selected
+  but inaccessible codon stays white),
 - **warnings** for PAM inclusions and unscannable codons,
 - copies of the inputs and the assembled `orfPlusContext.fa` for provenance.
 

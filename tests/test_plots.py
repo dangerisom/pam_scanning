@@ -30,3 +30,22 @@ def test_build_summary_contains_key_fields():
     assert "100.0% of the ORF" in s
     assert "354 of 354 requested" in s
     assert "/out/dir" in s
+
+
+def test_plot_with_selection_greys_unselected(tmp_path):
+    # 60 codons; selected = a scannable run + one deliberately-inaccessible codon.
+    gaps = [None if c in (9, 30) else (c % 30) for c in range(60)]
+    selected = {2, 3, 4, 5, 10}   # codon 10 -> index 9 is inaccessible (stays white)
+    png = plots.plot_scannable_positions(
+        str(tmp_path) + "/", "GeneSel", gaps, 30, 0.0, selected=selected)
+    assert png is not None
+    assert (tmp_path / "GeneSel-scannableMap.png").is_file()
+    assert (tmp_path / "GeneSel-scannableMap.pdf").is_file()
+
+
+def test_plot_selection_clamped_to_orf(tmp_path):
+    # Out-of-range selected numbers are ignored, not an error.
+    gaps = [c % 30 for c in range(20)]
+    png = plots.plot_scannable_positions(
+        str(tmp_path) + "/", "GeneClamp", gaps, 30, 0.0, selected={1, 5, 999})
+    assert png is not None

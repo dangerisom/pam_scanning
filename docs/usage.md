@@ -77,6 +77,10 @@ any one of:
 Any of these overrides the sampling gap. If both `--codon-positions` (or the picker)
 and `--codon-selection` are supplied, their residues are combined.
 
+When a specific set is requested, the **scannability grid** (`<gene>-scannableMap.pdf/png`)
+reports only those codons: unselected codons are greyed out, while a selected codon that
+is still inaccessible stays white so it stands out.
+
 ## Multiple ORFs
 
 Several ORFs can be scanned in one invocation; each produces its own time-stamped
