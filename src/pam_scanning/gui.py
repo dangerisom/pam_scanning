@@ -304,6 +304,9 @@ class CodonPicker(tk.Toplevel):
                            lambda e: self.view.configure(cursor="hand2"))
         self.view.tag_bind("residue", "<Leave>",
                            lambda e: self.view.configure(cursor="arrow"))
+        # Wheel/trackpad over the grid scrolls the grid itself (and, via the "break",
+        # never the window behind the picker).
+        self._wheel_bind(self.view, self.view)
 
         ctl = ttk.Frame(self, style="TFrame")
         ctl.pack(fill="x", padx=12, pady=(6, 2))
@@ -344,8 +347,8 @@ class CodonPicker(tk.Toplevel):
             lambda e: self.list_canvas.itemconfigure(self._list_window, width=e.width))
         # Wheel/trackpad scrolling, bound per-widget (never bind_all — the main GUI
         # relies on its own bind_all scroll handlers).
-        self._wheel_bind(self.list_canvas)
-        self._wheel_bind(self.list_inner)
+        self._wheel_bind(self.list_canvas, self.list_canvas)
+        self._wheel_bind(self.list_inner, self.list_canvas)
 
         actions = ttk.Frame(self, style="TFrame")
         actions.pack(fill="x", padx=12, pady=(4, 12))
@@ -464,7 +467,7 @@ class CodonPicker(tk.Toplevel):
             empty = ttk.Label(self.list_inner, style="Field.TLabel", foreground=MUTED,
                               text="No codons picked yet — click residues above or type positions.")
             empty.grid(row=0, column=0, sticky="w", padx=8, pady=6)
-            self._wheel_bind(empty)
+            self._wheel_bind(empty, self.list_canvas)
             return
         for i, (lo, hi) in enumerate(runs):
             if lo == hi:
@@ -476,37 +479,41 @@ class CodonPicker(tk.Toplevel):
             btn = ttk.Button(self.list_inner, text="Remove", style="Small.TButton", width=8,
                              command=lambda a=lo, b=hi: self._remove_run(a, b))
             btn.grid(row=i, column=1, sticky="e", padx=(6, 8), pady=1)
-            self._wheel_bind(lbl)
+            self._wheel_bind(lbl, self.list_canvas)
 
     def _remove_run(self, lo, hi):
         self.selected -= set(range(lo, hi + 1))
         self._changed()
 
-    # --- scrolling (per-widget; see note where these are bound) ---------------
-    def _wheel_bind(self, widget):
-        widget.bind("<MouseWheel>", self._on_list_wheel)
-        widget.bind("<Button-4>", self._on_list_wheel)
-        widget.bind("<Button-5>", self._on_list_wheel)
+    # --- scrolling ------------------------------------------------------------
+    # Bindings are per-widget (never bind_all) and return "break", so a scroll inside
+    # the picker scrolls its own widget and never the main window behind it. Direction
+    # matches the main window (reversed from the raw platform sign).
+    def _wheel_bind(self, widget, target):
+        """Scroll *target* when the wheel/trackpad is used over *widget*."""
+        widget.bind("<MouseWheel>", lambda e: self._scroll_wheel(target, e))
+        widget.bind("<Button-4>", lambda e: self._scroll_wheel(target, e))
+        widget.bind("<Button-5>", lambda e: self._scroll_wheel(target, e))
         try:
-            widget.bind("<TouchpadScroll>", self._on_list_touch)   # Tk >= 8.7 / 9
+            widget.bind("<TouchpadScroll>", lambda e: self._scroll_touch(target, e))
         except tk.TclError:
             pass
 
-    def _on_list_wheel(self, event):
+    def _scroll_wheel(self, target, event):
         if getattr(event, "num", None) == 4:
             step = 1
         elif getattr(event, "num", None) == 5:
             step = -1
         else:
             step = 1 if getattr(event, "delta", 0) > 0 else -1
-        self.list_canvas.yview_scroll(step, "units")
+        target.yview_scroll(step, "units")
         return "break"
 
-    def _on_list_touch(self, event):
+    def _scroll_touch(self, target, event):
         try:
             _dx, dy = self.tk.call("tk::PreciseScrollDeltas", event.delta)
             if dy:
-                self.list_canvas.yview_scroll(int(dy), "units")
+                target.yview_scroll(int(dy), "units")
         except tk.TclError:
             pass
         return "break"
@@ -692,14 +699,27 @@ def main():
             return 0
 
     def _wheel_direction(event):
-        """Mouse-wheel direction as -1 (up) / +1 (down) / 0, across platforms."""
+        """Mouse-wheel direction as +1 (content down) / -1 (content up) / 0. Reversed
+        from the raw platform sign so the main window scrolls the same way as the
+        codon picker."""
         if event.num == 4:
-            return -1
-        if event.num == 5:
             return 1
+        if event.num == 5:
+            return -1
         if not event.delta:
             return 0
-        return 1 if event.delta < 0 else -1
+        return -1 if event.delta < 0 else 1
+
+    def _event_in_main(event):
+        """True only when the scroll happened over the main window, not a modal on top
+        of it (e.g. the codon picker). The form's scroll handlers are bound with
+        ``bind_all``, so without this guard scrolling inside the picker would also move
+        the form underneath it."""
+        w = getattr(event, "widget", None)
+        try:
+            return w is not None and w.winfo_toplevel() is root
+        except (AttributeError, tk.TclError):
+            return False
 
     def _scroll_pixels(widget, accum, key, pixels, what):
         """Scroll *widget* by a possibly-fractional pixel amount, banking the remainder."""
@@ -712,11 +732,15 @@ def main():
     form_accum = {"y": 0.0}
 
     def _on_touchpad(event):
+        if not _event_in_main(event):
+            return
         dy = _touchpad_dy(event)
         if dy:
             _scroll_pixels(canvas, form_accum, "y", dy * TOUCHPAD_SCALE, "units")
 
     def _on_mousewheel(event):
+        if not _event_in_main(event):
+            return
         direction = _wheel_direction(event)
         if direction:
             canvas.yview_scroll(direction * MOUSE_WHEEL_PIXELS, "units")
