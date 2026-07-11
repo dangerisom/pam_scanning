@@ -4,6 +4,9 @@ PAM-scanning can be driven from the command line (`pam-scan`), a Tkinter GUI
 (`pam-scan-gui`), or programmatically via `pam_scanning.chimeras.pamscan(**kwargs)`.
 All three share the same parameters and produce the same output.
 
+For *what* the tool computes (the algorithm behind these parameters), see
+[`pipeline.md`](pipeline.md); this page is the parameter and output reference.
+
 ## Parameters
 
 | CLI flag | kwarg | Default | Description |

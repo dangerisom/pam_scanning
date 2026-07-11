@@ -14,6 +14,18 @@ ORF** ("PAM scanning"). Given an open reading frame and its genomic context, the
 
 This is the reference implementation accompanying the PAM-scanning manuscript.
 
+For a step-by-step account of the algorithm — how PAM sites become silenced,
+off-target-screened, per-codon-optimal guides and orderable primers — see
+[`docs/pipeline.md`](docs/pipeline.md).
+
+## Contents
+
+- [Installation](#installation) — conda, pip, or a double-click launcher
+- [Prerequisites: a local BLAST database](#prerequisites-a-local-blast-database)
+- [Usage](#usage) — [command line](#command-line) and [graphical interface](#graphical-interface)
+- [Inputs](#inputs)
+- **Docs:** [pipeline overview](docs/pipeline.md) · [full usage reference](docs/usage.md) · [BLAST setup](docs/blast_setup.md) · [non-coder install guide](INSTALL.md)
+
 ## Installation
 
 PAM-scanning depends on the external **NCBI BLAST+** toolkit (`blastn`), which is most
