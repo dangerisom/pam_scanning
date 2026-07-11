@@ -45,3 +45,6 @@ env/
 *.swp
 .idea/
 .vscode/
+
+# Editor / IDE
+.obsidian/
