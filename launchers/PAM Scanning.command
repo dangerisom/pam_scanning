@@ -54,4 +54,9 @@ if ! "$CONDA" env list | awk '{print $1}' | grep -qx "$ENV_NAME"; then
 fi
 
 echo "Starting PAM Scanning…"
+# Run from a neutral directory. `conda run` puts the current directory first on
+# sys.path, so launching from a folder that contains (or sits beside) anything named
+# `pam_scanning` would shadow the installed package and fail with
+# "No module named 'pam_scanning.gui'".
+cd "$HOME" || cd /
 exec "$CONDA" run --no-capture-output -n "$ENV_NAME" pam-scan-gui
