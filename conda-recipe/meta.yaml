@@ -6,11 +6,11 @@ package:
   version: {{ version }}
 
 source:
-  # For a Bioconda submission, replace with the released sdist URL + sha256, e.g.:
-  #   url: https://pypi.io/packages/source/p/{{ name }}/pam_scanning-{{ version }}.tar.gz
-  #   sha256: <fill in at release time>
-  # For local `conda build`, build straight from this checkout:
-  path: ..
+  url: https://github.com/dangerisom/{{ name }}/archive/refs/tags/v{{ version }}.tar.gz
+  sha256: d413775fccab8a830fbb10dcf335033c0b84080917cd0e007abc6ddaf92fe1e3
+  # For a local `conda build` from this checkout instead, comment out the two lines
+  # above and use:
+  #   path: ..
 
 build:
   noarch: python
@@ -19,6 +19,7 @@ build:
   entry_points:
     - pam-scan = pam_scanning.cli:main
     - pam-scan-gui = pam_scanning.gui:main
+    - pam-scan-fetch-cds = pam_scanning.fetch_cds:main
 
 requirements:
   host:
