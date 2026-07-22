@@ -12,7 +12,7 @@ authors:
     email: disom.biophysics@gmail.com
     affiliation: "Isom Lab"
 license: MIT
-version: 1.0.0
+version: 1.0.1
 repository-code: "https://github.com/dangerisom/pam_scanning"
 keywords:
   - CRISPR

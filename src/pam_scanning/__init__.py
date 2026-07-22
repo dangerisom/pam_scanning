@@ -5,4 +5,4 @@ See :func:`pam_scanning.chimeras.pamscan` for the high-level pipeline, the
 ``pam-scan-gui`` Tkinter front-end (:mod:`pam_scanning.gui`).
 """
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
