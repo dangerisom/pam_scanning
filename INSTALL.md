@@ -78,3 +78,36 @@ pam-scan --help                        # command-line version
 
 See [`docs/usage.md`](docs/usage.md) for all options and
 [`docs/blast_setup.md`](docs/blast_setup.md) for building a BLAST database.
+
+### "No module named 'pam_scanning.gui'"
+
+If a command fails with:
+
+```
+ModuleNotFoundError: No module named 'pam_scanning.gui'
+```
+
+another copy of `pam_scanning` is shadowing the installed one. Directories on
+`PYTHONPATH` take precedence over the environment's `site-packages`, and so does the
+current working directory, so an older copy of this project in either place wins.
+
+The double-click launchers already guard against this. If you are running the commands
+yourself, check what actually got imported:
+
+```bash
+python -c "import pam_scanning; print(pam_scanning.__file__)"
+```
+
+If that path is not inside your environment's `site-packages`, run with `PYTHONPATH`
+cleared:
+
+```bash
+env -u PYTHONPATH pam-scan-gui        # macOS / Linux
+```
+
+```bat
+set PYTHONPATH=  &  pam-scan-gui      REM Windows
+```
+
+To fix it permanently, rename the older copy or drop its parent directory from
+`PYTHONPATH`.
