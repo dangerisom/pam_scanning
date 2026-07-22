@@ -54,9 +54,15 @@ if ! "$CONDA" env list | awk '{print $1}' | grep -qx "$ENV_NAME"; then
 fi
 
 echo "Starting PAM Scanning…"
-# Run from a neutral directory. `conda run` puts the current directory first on
-# sys.path, so launching from a folder that contains (or sits beside) anything named
-# `pam_scanning` would shadow the installed package and fail with
-# "No module named 'pam_scanning.gui'".
+# Isolate from the user's Python environment before launching.
+#
+#   * PYTHONPATH is cleared: entries there take precedence over the environment's
+#     site-packages, so any directory named `pam_scanning` on PYTHONPATH (e.g. an older
+#     copy of this project) shadows the installed package and the app dies with
+#     "ModuleNotFoundError: No module named 'pam_scanning.gui'".
+#   * We cd elsewhere first: `conda run` also places the current directory on sys.path,
+#     which can shadow the package the same way.
+#
+# The environment created above is self-contained, so nothing here needs PYTHONPATH.
 cd "$HOME" || cd /
-exec "$CONDA" run --no-capture-output -n "$ENV_NAME" pam-scan-gui
+exec env -u PYTHONPATH "$CONDA" run --no-capture-output -n "$ENV_NAME" pam-scan-gui
